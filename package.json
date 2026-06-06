@@ -1,0 +1,42 @@
+{
+  "name": "pi-lodestone",
+  "version": "0.1.0",
+  "description": "Persistent memory for the Pi coding agent, tuned for local LLMs. Curated decisions, preferences, and workflows that survive future sessions, with cheap context-aware injection.",
+  "type": "module",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-coding-agent",
+    "memory",
+    "local-llm"
+  ],
+  "license": "MIT",
+  "author": "Jeff <36237258+k0udo@users.noreply.github.com>",
+  "homepage": "https://github.com/k0udo/pi-lodestone#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/k0udo/pi-lodestone.git"
+  },
+  "bugs": {
+    "url": "https://github.com/k0udo/pi-lodestone/issues"
+  },
+  "pi": {
+    "extensions": ["./extension/index.ts"],
+    "skills": ["./skills/lodestone"]
+  },
+  "files": [
+    "extension",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test 'tests/**/*.test.ts'"
+  },
+  "dependencies": {
+    "typebox": "^1.2.1"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.73.0"
+  }
+}
