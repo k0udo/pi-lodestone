@@ -27,6 +27,7 @@
   "files": [
     "extension",
     "skills",
+    "docs",
     "README.md",
     "LICENSE"
   ],
