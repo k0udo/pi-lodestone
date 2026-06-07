@@ -51,8 +51,9 @@ All behavior is environment-variable configurable (injection limits, score
 thresholds, snippet sizes, store location, an optional Markdown-vault export, …).
 See [`skills/lodestone/README.md`](skills/lodestone/README.md) for the full
 operational reference, slash-command catalog, and environment-variable table.
-See [`docs/development.md`](docs/development.md) for maintainer notes on the
-local-LLM design constraints, scoring model, tests, and release checklist.
+See [`docs/development.md`](docs/development.md) for maintainer notes and
+[`docs/wiki/`](docs/wiki/) for reference docs on the scoring model, store, and
+extension API — useful for anyone extending this package.
 
 ## License
 

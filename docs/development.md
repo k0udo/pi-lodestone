@@ -54,6 +54,11 @@ When changing storage or data shape:
 - Keep lock acquisition stale-safe and atomic writes crash-safe.
 - Add tests for corrupt lines, concurrent-ish mutation behavior, archive/active state changes, and settings persistence when touched.
 
+## Reference docs
+
+[`docs/wiki/`](../wiki/) — architecture, scoring, store, extension API, privacy.
+Useful when modifying any of the core modules.
+
 ## Commands before review
 
 ```bash
