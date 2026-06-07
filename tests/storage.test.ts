@@ -107,6 +107,23 @@ test("cache reloads when file mtime changes (foreign writes detected)", async ()
   }
 });
 
+test("add preserves foreign writes when cache is stale", async () => {
+  const { store, dir } = await tempStore();
+  try {
+    await store.add(decision({ id: "a" }));
+    assert.equal((await store.all()).length, 1);
+    const cfg = defaultStoreConfig(dir);
+    const foreign = decision({ id: "foreign", title: "Foreign" });
+    await new Promise((r) => setTimeout(r, 10));
+    await writeFile(cfg.decisionsPath, `${JSON.stringify(decision({ id: "a" }))}\n${JSON.stringify(foreign)}\n`, "utf8");
+    await store.add(decision({ id: "b" }));
+    const all = await store.all();
+    assert.deepEqual(all.map((d) => d.id), ["a", "foreign", "b"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("settings round-trip preserves disabledProjects list", async () => {
   const { store, dir } = await tempStore();
   try {

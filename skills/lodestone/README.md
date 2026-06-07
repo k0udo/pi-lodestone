@@ -8,10 +8,10 @@ Lodestone is intentionally minimal for local-LLM operation:
 
 - **Single store**: `~/.pi/agent/memory/decisions.jsonl`. Append-only, in-process cached, mtime-invalidated on foreign writes.
 - **Minimal lifecycle metadata**: `archived`, `important`, plus optional `supersededBy`/`supersedes`/`conflictsWith` for explicit human-reviewed corrections.
-- **No tool-result auto-capture**: tool calls write nothing. The local model never pays for the dedupe/append round-trip on every read/edit/bash call.
+- **No tool-result auto-capture**: tool calls write no diagnostic usage logs unless `PI_MEMORY_DIAGNOSTIC_LOGS=true`. The local model never pays for a dedupe/append round-trip on every read/edit/bash call.
 - **No agent_end auto-capture by default** (set `PI_MEMORY_AUTO_TURN_CAPTURE=true` to opt in).
 - **No git work on the hot path**: checkpoint and push only on manual `/memory git checkpoint|push` or via a launchd backup job (see below).
-- **One scoring function**: `scoreDecision`. Lexical hits in title/tags/body, plus tiny deterministic IDF-style corpus weighting, pin/locality/recency bonuses. Automatic injection first drops generic instruction words, requires multi-token non-generic evidence, damps long prompts, ignores usage-count feedback, excludes superseded entries and legacy `turn` captures, and excludes non-manual operational memories unless they carry durable decision/preference/workflow tags. Zero-result injection decisions are logged compactly for threshold tuning. Archived → score 0.
+- **One scoring function**: `scoreDecision`. Lexical hits in title/tags/body, plus tiny deterministic IDF-style corpus weighting, pin/locality/recency bonuses. Automatic injection first drops generic instruction words, requires multi-token non-generic evidence, damps long prompts, ignores usage-count feedback, excludes superseded entries and legacy `turn` captures, and excludes non-manual operational memories unless they carry durable decision/preference/workflow tags. When diagnostic logs are enabled, zero-result injection decisions are logged compactly for threshold tuning. Archived → score 0.
 - **KV-cache-friendly injection**: by default, relevant memories are added as a non-persistent preamble on the latest user message via the `context` event, keeping the system prompt stable for local inference prefix-cache reuse. Set `PI_MEMORY_INJECT_PLACEMENT=system` only if provider behavior requires the old mutable-system-prompt mode.
 
 ## Slash commands
@@ -59,6 +59,8 @@ Lodestone is intentionally minimal for local-LLM operation:
 | `PI_MEMORY_SEARCH_SNIPPET_CHARS` | `220` | Max query-aware snippet characters per search result |
 | `PI_MEMORY_GET_MAX_OUTPUT_CHARS` | `10000` | Default output cap for `memory-get`; pass `maxChars` for explicit expansion |
 | `PI_MEMORY_UPDATE_USAGE_COUNTERS` | `false` | Opt-in: update retrieval/injection counters in `decisions.jsonl`; off by default to avoid read-path writes |
+| `PI_MEMORY_DIAGNOSTIC_LOGS` | `false` | Opt-in: write injection/tool diagnostics to `injections.jsonl` and `tool-usage.jsonl` for `/memory why*` and `/memory tool-stats` |
+| `PI_MEMORY_DIAGNOSTIC_PROMPT_PREVIEW` | `false` | Opt-in: include a short sanitized prompt preview in diagnostic injection logs |
 | `PI_MEMORY_MAX_TEXT_CHARS` | `4000` | Max stored text per entry |
 | `PI_MEMORY_TURN_USER_MAX_CHARS` | `1200` | Max user text retained when capturing turns |
 | `PI_MEMORY_TURN_ASSISTANT_MAX_CHARS` | `1800` | Max assistant text retained when capturing turns |

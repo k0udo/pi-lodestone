@@ -31,6 +31,8 @@ const SEARCH_SNIPPET_CHARS = Number(process.env.PI_MEMORY_SEARCH_SNIPPET_CHARS ?
 const STALENESS_DEFAULT_DAYS = Number(process.env.PI_MEMORY_STALENESS_DAYS ?? 30);
 const MEMORY_GET_MAX_OUTPUT_CHARS = Number(process.env.PI_MEMORY_GET_MAX_OUTPUT_CHARS ?? 10_000);
 const UPDATE_USAGE_COUNTERS = (process.env.PI_MEMORY_UPDATE_USAGE_COUNTERS ?? "false") === "true";
+const DIAGNOSTIC_LOGS = (process.env.PI_MEMORY_DIAGNOSTIC_LOGS ?? "false") === "true";
+const DIAGNOSTIC_PROMPT_PREVIEW = (process.env.PI_MEMORY_DIAGNOSTIC_PROMPT_PREVIEW ?? "false") === "true";
 const TURN_USER_MAX_CHARS = Number(process.env.PI_MEMORY_TURN_USER_MAX_CHARS ?? 1_200);
 const TURN_ASSISTANT_MAX_CHARS = Number(process.env.PI_MEMORY_TURN_ASSISTANT_MAX_CHARS ?? 1_800);
 // Optional bridge to a Markdown vault directory. Opt-in: set PI_MEMORY_VAULT_DIR
@@ -312,6 +314,7 @@ async function bumpUse(ids: string[], usage: "retrieved" | "injected") {
 }
 
 async function recordToolUsage(tool: string, cwd: string, resultCount: number, extra: Record<string, unknown> = {}) {
+  if (!DIAGNOSTIC_LOGS) return;
   await logToolUsage(TOOL_USAGE_LOG_FILE, {
     ts: new Date().toISOString(),
     tool,
@@ -857,12 +860,12 @@ export default function (pi: ExtensionAPI) {
           updatedAt: now,
           cwd: ctx.cwd,
           project: projectName(ctx.cwd),
-          source: "manual",
+          source: "turn",
           title,
           text,
-          tags: inferTags(title, text, ["session-summary", "workflow"]),
+          tags: inferTags(title, text, ["session-summary"]),
           important: false,
-          archived: false,
+          archived: true,
           retrievalCount: 0,
           injectionCount: 0,
         };
@@ -870,7 +873,7 @@ export default function (pi: ExtensionAPI) {
         const path = await writeVaultNote(decision, VAULT_MEMORY_DIR);
         if (path) await store.patch(decision.id, { kbPath: path });
         const checkpoint = await memoryCheckpoint(`summarize-session ${decision.id}`);
-        const noteLine = path ? `Saved [${decision.id}] → ${path}` : `Saved [${decision.id}] (memory only; set PI_MEMORY_VAULT_DIR to also write a vault note)`;
+        const noteLine = path ? `Saved archived session summary [${decision.id}] → ${path}` : `Saved archived session summary [${decision.id}] (not eligible for injection; set PI_MEMORY_VAULT_DIR to also write a vault note)`;
         ctx.ui.setWidget("pi-memory", [noteLine, checkpoint.message], { placement: "belowEditor" });
         return;
       }
@@ -1020,14 +1023,14 @@ export default function (pi: ExtensionAPI) {
       ts: new Date().toISOString(),
       cwd: ctx.cwd,
       project: projectName(ctx.cwd),
-      promptPreview: prompt.slice(0, 200),
+      ...(DIAGNOSTIC_PROMPT_PREVIEW ? { promptPreview: prompt.slice(0, 200) } : {}),
       promptCharCount: prompt.length,
       minScore: INJECT_MIN_SCORE,
       limit: INJECT_LIMIT,
       globalInject: GLOBAL_AUTO_INJECT,
     };
     if (query.length < 3) {
-      await logInjection(INJECTION_LOG_FILE, { ...baseRecord, results: [] }).catch(() => undefined);
+      if (DIAGNOSTIC_LOGS) await logInjection(INJECTION_LOG_FILE, { ...baseRecord, results: [] }).catch(() => undefined);
       return;
     }
     const results = await search(query, {
@@ -1038,17 +1041,19 @@ export default function (pi: ExtensionAPI) {
       minScore: INJECT_MIN_SCORE,
       snippetChars: INJECT_SNIPPET_CHARS,
     });
-    await logInjection(INJECTION_LOG_FILE, {
-      ...baseRecord,
-      results: results.map((r) => ({
-        id: r.id,
-        title: r.title,
-        kind: r.source,
-        source: r.source,
-        score: r.score ?? 0,
-        snippetLength: r.snippet.length,
-      })),
-    }).catch(() => undefined);
+    if (DIAGNOSTIC_LOGS) {
+      await logInjection(INJECTION_LOG_FILE, {
+        ...baseRecord,
+        results: results.map((r) => ({
+          id: r.id,
+          title: r.title,
+          kind: r.source,
+          source: r.source,
+          score: r.score ?? 0,
+          snippetLength: r.snippet.length,
+        })),
+      }).catch(() => undefined);
+    }
     if (results.length === 0) return;
     await bumpUse(results.map((r) => r.id), "injected");
     const currentProject = projectName(ctx.cwd);

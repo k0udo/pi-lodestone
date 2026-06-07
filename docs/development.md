@@ -8,8 +8,8 @@ pi-lodestone is persistent memory for Pi with local LLM operation as the default
 2. **Curated memory, not transcripts**: durable decisions/preferences/workflows should be explicitly selected or carefully extracted; raw tool output and full conversations should stay out of automatic injection.
 3. **Cheap automatic injection**: the `context` hook must remain fast and bounded. Prefer deterministic lexical scoring, short snippets, and low result counts.
 4. **Stable system prompt**: default injection belongs on the latest user message (`PI_MEMORY_INJECT_PLACEMENT=user`) so local providers can reuse prefix/KV cache.
-5. **Privacy by default**: keep `<private>...</private>` stripping and common secret masking on every write path.
-6. **No read-path writes by default**: retrieval and injection counters are opt-in because local workflows should not rewrite the store every turn.
+5. **Privacy by default**: keep `<private>...</private>` stripping and common secret masking on every write path; diagnostic logs and prompt previews are opt-in.
+6. **No read-path writes by default**: retrieval/injection counters and diagnostic logs are opt-in because local workflows should not rewrite the store every turn.
 
 ## Repository map
 

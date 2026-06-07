@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Decision, DecisionPatch, Settings } from "./types.ts";
 
@@ -119,12 +119,11 @@ export class DecisionStore {
   async add(decision: Decision): Promise<Decision> {
     return this.withMutation(async () => {
       await this.ensure();
-      const current = await this.loadFromDisk();
-      current.push(decision);
-      const body = current.map((d) => JSON.stringify(d)).join("\n");
-      await this.writeAtomic(this.config.decisionsPath, `${body}\n`);
+      const before = await stat(this.config.decisionsPath);
+      const base = this.cache?.mtimeMs === before.mtimeMs ? this.cache.decisions : await this.loadFromDisk();
+      await appendFile(this.config.decisionsPath, `${JSON.stringify(decision)}\n`, "utf8");
       const st = await stat(this.config.decisionsPath);
-      this.cache = { mtimeMs: st.mtimeMs, decisions: current };
+      this.cache = { mtimeMs: st.mtimeMs, decisions: [...base, decision] };
       return decision;
     });
   }
