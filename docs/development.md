@@ -13,9 +13,19 @@ pi-lodestone is persistent memory for Pi with local LLM operation as the default
 
 ## Repository map
 
-- `extension/index.ts` — Pi extension entrypoint, tool registration, slash commands, context injection, sanitization, and optional vault/git helpers.
+- `extension/index.ts` — Pi extension entrypoint: tool registration, slash commands, context injection, and event hooks. Orchestration only; the helper logic lives in the focused modules below.
+- `extension/config.ts` — all environment-variable configuration (limits, thresholds, paths, flags) resolved in one place.
+- `extension/store-instance.ts` — the shared `DecisionStore` singleton used across modules.
 - `extension/storage.ts` — append-only JSONL decision store, file locking, atomic rewrites, settings, archive/patch helpers.
 - `extension/scoring.ts` — tokenization, project scoping, deterministic score calculation, and auto-injection filters.
+- `extension/sanitize.ts` — privacy guards: `<private>` stripping and secret masking applied on every write path.
+- `extension/text.ts` — generic text helpers (content extraction, truncation, query-aware excerpts, output caps).
+- `extension/preamble.ts` — KV-cache-friendly injection of the memory block onto the latest user message.
+- `extension/dedup.ts` — lexical near-duplicate detection for `memory-add`.
+- `extension/turn.ts` — turn-capture helpers (durable-signal detection and decision-statement extraction).
+- `extension/git.ts` — optional, off-hot-path git checkpointing of the memory store.
+- `extension/vault.ts` — optional Markdown-vault export (`promote-to-kb`).
+- `extension/staleness.ts` — review-only staleness analysis over the diagnostic/legacy logs.
 - `extension/injection-log.ts` — compact diagnostics for injection and tool usage decisions.
 - `extension/migrate.ts` — one-time migration from legacy `observations.jsonl`/`index.json` stores.
 - `extension/types.ts` — shared data model.

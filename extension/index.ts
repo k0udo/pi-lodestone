@@ -1,49 +1,43 @@
 import { strict as assert } from "node:assert";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { homedir } from "node:os";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Decision } from "./types.ts";
-import { DecisionStore, defaultStoreConfig } from "./storage.ts";
+import {
+  AUTO_INJECT,
+  AUTO_TURN_CAPTURE,
+  DIAGNOSTIC_LOGS,
+  DIAGNOSTIC_PROMPT_PREVIEW,
+  GLOBAL_AUTO_INJECT,
+  INJECT_LIMIT,
+  INJECT_MIN_SCORE,
+  INJECT_PLACEMENT,
+  INJECT_QUERY_MAX_TOKENS,
+  INJECT_SNIPPET_CHARS,
+  INJECTION_LOG_FILE,
+  MEMORY_DIR,
+  MEMORY_GET_MAX_OUTPUT_CHARS,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_SNIPPET_CHARS,
+  STALENESS_DEFAULT_DAYS,
+  TOOL_USAGE_LOG_FILE,
+  UPDATE_USAGE_COUNTERS,
+  VAULT_DIR,
+  VAULT_KB_DIR,
+  VAULT_MEMORY_DIR,
+} from "./config.ts";
+import { store } from "./store-instance.ts";
 import { buildTokenWeights, inferTags, projectName, projectRoot, sameProjectScope, scoreDecision, tokenize } from "./scoring.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
+import { sanitize } from "./sanitize.ts";
+import { capOutput, clampNumber, excerpt, textFromContent } from "./text.ts";
+import { applyUserPreamble } from "./preamble.ts";
+import { findPotentialDuplicate } from "./dedup.ts";
+import { compactTurnText, decisionStatementFromTurn, hasDurableSignal } from "./turn.ts";
+import { ensureMemoryGit, memoryCheckpoint, memoryStatus, runGit } from "./git.ts";
+import { writeVaultNote } from "./vault.ts";
+import { renderStaleness, staleMemories } from "./staleness.ts";
 
-const MEMORY_DIR = process.env.PI_MEMORY_DIR ?? join(homedir(), ".pi", "agent", "memory");
-const INJECTION_LOG_FILE = join(MEMORY_DIR, "injections.jsonl");
-const TOOL_USAGE_LOG_FILE = join(MEMORY_DIR, "tool-usage.jsonl");
-const OBSERVATIONS_LOG_FILE = join(MEMORY_DIR, "observations.jsonl");
-const MAX_TEXT_CHARS = Number(process.env.PI_MEMORY_MAX_TEXT_CHARS ?? 4_000);
-const AUTO_INJECT = (process.env.PI_MEMORY_AUTO_INJECT ?? "true") !== "false";
-const AUTO_TURN_CAPTURE = (process.env.PI_MEMORY_AUTO_TURN_CAPTURE ?? "false") === "true";
-const GLOBAL_AUTO_INJECT = (process.env.PI_MEMORY_GLOBAL_AUTO_INJECT ?? "false") === "true";
-const INJECT_LIMIT = Number(process.env.PI_MEMORY_INJECT_LIMIT ?? 3);
-const INJECT_MIN_SCORE = Number(process.env.PI_MEMORY_INJECT_MIN_SCORE ?? 8);
-const INJECT_SNIPPET_CHARS = Number(process.env.PI_MEMORY_INJECT_SNIPPET_CHARS ?? 180);
-const INJECT_QUERY_MAX_TOKENS = Number(process.env.PI_MEMORY_INJECT_QUERY_MAX_TOKENS ?? 32);
-const INJECT_PLACEMENT = (process.env.PI_MEMORY_INJECT_PLACEMENT ?? "user").toLowerCase() === "system" ? "system" : "user";
-const SEARCH_DEFAULT_LIMIT = Number(process.env.PI_MEMORY_SEARCH_DEFAULT_LIMIT ?? 5);
-const SEARCH_SNIPPET_CHARS = Number(process.env.PI_MEMORY_SEARCH_SNIPPET_CHARS ?? 220);
-const STALENESS_DEFAULT_DAYS = Number(process.env.PI_MEMORY_STALENESS_DAYS ?? 30);
-const MEMORY_GET_MAX_OUTPUT_CHARS = Number(process.env.PI_MEMORY_GET_MAX_OUTPUT_CHARS ?? 10_000);
-const UPDATE_USAGE_COUNTERS = (process.env.PI_MEMORY_UPDATE_USAGE_COUNTERS ?? "false") === "true";
-const DIAGNOSTIC_LOGS = (process.env.PI_MEMORY_DIAGNOSTIC_LOGS ?? "false") === "true";
-const DIAGNOSTIC_PROMPT_PREVIEW = (process.env.PI_MEMORY_DIAGNOSTIC_PROMPT_PREVIEW ?? "false") === "true";
-const TURN_USER_MAX_CHARS = Number(process.env.PI_MEMORY_TURN_USER_MAX_CHARS ?? 1_200);
-const TURN_ASSISTANT_MAX_CHARS = Number(process.env.PI_MEMORY_TURN_ASSISTANT_MAX_CHARS ?? 1_800);
-// Optional bridge to a Markdown vault directory. Opt-in: set PI_MEMORY_VAULT_DIR
-// to a vault root to enable `promote-to-kb`. Empty by default so the package
-// never writes outside the memory store unless asked.
-const VAULT_DIR = process.env.PI_MEMORY_VAULT_DIR ?? "";
-const VAULT_MEMORY_DIR = process.env.PI_MEMORY_VAULT_MEMORY_DIR ?? "Agent/Memory";
-const VAULT_KB_DIR = process.env.PI_MEMORY_VAULT_KB_DIR ?? "Agent/KB";
-
-const execFileAsync = promisify(execFile);
-const store = new DecisionStore(defaultStoreConfig(MEMORY_DIR));
 const INJECTION_QUERY_STOP_WORDS = new Set([
   "again", "another", "assessment", "begin", "changes", "check", "closing", "commit", "complete",
   "complete-ness", "completeness", "designed", "detail", "enhancement", "enhancements", "explicit", "explict",
@@ -56,93 +50,10 @@ function makeId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block: any) => {
-      if (block?.type === "text") return block.text ?? "";
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function stripPrivate(text: string) {
-  return text.replace(/<private>[\s\S]*?<\/private>/gi, "[private omitted]");
-}
-
-function maskSecrets(text: string) {
-  return text
-    .replace(/\b([A-Za-z0-9_]*?(?:TOKEN|SECRET|PASSWORD|API[_-]?KEY)[A-Za-z0-9_]*?)\s*=\s*[^\s\n]+/gi, "$1=[redacted]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+\-/]+=*/gi, "Bearer [redacted]")
-    .replace(/sk-[A-Za-z0-9]{20,}/g, "sk-[redacted]");
-}
-
-function sanitize(text: string) {
-  return maskSecrets(stripPrivate(text)).trim().slice(0, MAX_TEXT_CHARS);
-}
-
-function truncate(text: string, n: number) {
-  return text.length <= n ? text : `${text.slice(0, n)}…`;
-}
-
-function clampNumber(value: unknown, fallback: number, min: number, max: number) {
-  const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
-  return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-function capOutput(text: string, maxChars: number) {
-  if (text.length <= maxChars) return text;
-  return `${text.slice(0, maxChars)}\n\n[truncated by memory-get at ${maxChars} chars; call again with fewer IDs or larger maxChars if needed]`;
-}
-
 function compactQuery(text: string, maxTokens: number) {
   return [...new Set(tokenize(text).filter((token) => !INJECTION_QUERY_STOP_WORDS.has(token)))]
     .slice(0, Math.max(1, maxTokens))
     .join(" ");
-}
-
-function applyUserPreamble(messages: any[], preamble: string) {
-  if (!preamble) return messages;
-  const next = [...messages];
-  const idx = next.findLastIndex((message) => message?.role === "user");
-  if (idx < 0) return messages;
-  const message = { ...next[idx] };
-  const prefix = `${preamble}\n\n## User request\n`;
-  if (typeof message.content === "string") {
-    message.content = message.content.startsWith(preamble) ? message.content : `${prefix}${message.content}`;
-  } else if (Array.isArray(message.content)) {
-    const content = [...message.content];
-    const textIdx = content.findIndex((block) => block?.type === "text");
-    if (textIdx >= 0) {
-      const block = { ...content[textIdx] };
-      const text = String(block.text ?? "");
-      block.text = text.startsWith(preamble) ? text : `${prefix}${text}`;
-      content[textIdx] = block;
-    } else {
-      content.unshift({ type: "text", text: prefix.trimEnd() });
-    }
-    message.content = content;
-  }
-  next[idx] = message;
-  return next;
-}
-
-function excerpt(text: string, query: string | undefined, maxChars: number) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= maxChars) return clean;
-  const terms = query ? [...new Set(tokenize(query))].sort((a, b) => b.length - a.length).slice(0, 12) : [];
-  const lower = clean.toLowerCase();
-  let best = -1;
-  for (const term of terms) {
-    const idx = lower.indexOf(term);
-    if (idx >= 0 && (best < 0 || idx < best)) best = idx;
-  }
-  if (best < 0) return `${clean.slice(0, maxChars)}…`;
-  const start = Math.max(0, Math.min(best - Math.floor(maxChars * 0.35), clean.length - maxChars));
-  const end = Math.min(clean.length, start + maxChars);
-  return `${start > 0 ? "…" : ""}${clean.slice(start, end)}${end < clean.length ? "…" : ""}`;
 }
 
 function compact(decision: Decision, score?: number, query?: string, snippetChars = SEARCH_SNIPPET_CHARS) {
@@ -170,113 +81,6 @@ function renderCompactList(items: ReturnType<typeof compact>[]) {
       `   ${r.snippet}`,
     ].join("\n"))
     .join("\n\n");
-}
-
-type MemoryLike = Pick<Decision, "id" | "title" | "createdAt" | "updatedAt" | "text" | "archived" | "lastRetrievedAt" | "lastInjectedAt">;
-
-function parseJsonLines(text: string): any[] {
-  const rows: any[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      // Ignore corrupt log lines; staleness is advisory only.
-    }
-  }
-  return rows;
-}
-
-async function readMemoryLikeEntries(fallback: Decision[]): Promise<MemoryLike[]> {
-  if (!existsSync(OBSERVATIONS_LOG_FILE)) return fallback;
-  const rows = parseJsonLines(await readFile(OBSERVATIONS_LOG_FILE, "utf8"));
-  return rows
-    .map((row) => ({
-      id: String(row.id ?? ""),
-      title: String(row.title ?? row.summary ?? "Untitled memory"),
-      createdAt: String(row.createdAt ?? row.timestamp ?? row.ts ?? ""),
-      updatedAt: String(row.updatedAt ?? row.timestamp ?? row.ts ?? ""),
-      text: String(row.text ?? ""),
-      archived: row.archived === true || row.state === "archived",
-      lastRetrievedAt: typeof row.lastRetrievedAt === "string" ? row.lastRetrievedAt : undefined,
-      lastInjectedAt: typeof row.lastInjectedAt === "string" ? row.lastInjectedAt : undefined,
-    }))
-    .filter((row) => row.id && Number.isFinite(Date.parse(row.createdAt)));
-}
-
-async function readLastReferences(): Promise<Map<string, string>> {
-  const refs = new Map<string, string>();
-  const note = (id: unknown, ts: unknown) => {
-    if (typeof id !== "string" || typeof ts !== "string" || !Number.isFinite(Date.parse(ts))) return;
-    const prev = refs.get(id);
-    if (!prev || Date.parse(ts) > Date.parse(prev)) refs.set(id, ts);
-  };
-  if (existsSync(TOOL_USAGE_LOG_FILE)) {
-    for (const row of parseJsonLines(await readFile(TOOL_USAGE_LOG_FILE, "utf8"))) {
-      for (const id of row.resultIds ?? row.returnedIds ?? row.requestedIds ?? row.details?.resultIds ?? row.details?.returnedIds ?? []) note(id, row.ts);
-    }
-  }
-  if (existsSync(INJECTION_LOG_FILE)) {
-    for (const row of parseJsonLines(await readFile(INJECTION_LOG_FILE, "utf8"))) {
-      for (const result of row.results ?? []) note(result?.id, row.ts);
-    }
-  }
-  return refs;
-}
-
-function latestIso(...values: (string | undefined)[]) {
-  return values.filter((v): v is string => Boolean(v) && Number.isFinite(Date.parse(v))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
-}
-
-async function staleMemories(days: number, fallback: Decision[]) {
-  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-  const [entries, refs] = await Promise.all([readMemoryLikeEntries(fallback), readLastReferences()]);
-  return entries
-    .filter((entry) => !entry.archived && Date.parse(entry.createdAt) < cutoffMs)
-    .map((entry) => {
-      const lastReferenced = latestIso(refs.get(entry.id), entry.lastRetrievedAt, entry.lastInjectedAt);
-      return { entry, ageDays: Math.floor((Date.now() - Date.parse(entry.createdAt)) / (24 * 60 * 60 * 1000)), lastReferenced };
-    })
-    .filter((row) => !row.lastReferenced || Date.parse(row.lastReferenced) < cutoffMs)
-    .sort((a, b) => (Date.parse(a.lastReferenced ?? "1970-01-01") - Date.parse(b.lastReferenced ?? "1970-01-01")) || Date.parse(a.entry.createdAt) - Date.parse(b.entry.createdAt))
-    .slice(0, 20);
-}
-
-function renderStaleness(rows: Awaited<ReturnType<typeof staleMemories>>, days: number) {
-  if (rows.length === 0) return `No stale memories older than ${days} days.`;
-  return [
-    `Stale memory candidates (> ${days} days old, max 20; review-only):`,
-    ...rows.map(({ entry, ageDays, lastReferenced }, i) => `${i + 1}. [${entry.id}] ${entry.title} · age ${ageDays}d · last referenced ${lastReferenced ? lastReferenced.slice(0, 10) : "unknown"}`),
-  ].join("\n");
-}
-
-const DEDUP_STOP_WORDS = new Set([
-  "about", "after", "again", "agent", "because", "before", "current", "decision", "decided", "default", "during", "entry", "implementation", "memory", "pi", "project", "should", "summary", "that", "then", "there", "these", "this", "using", "when", "with", "workflow",
-]);
-
-function significantWords(text: string) {
-  return [...new Set(tokenize(text).filter((token) => token.length >= 4 && !DEDUP_STOP_WORDS.has(token)))];
-}
-
-function overlapRatio(a: string[], b: string[]) {
-  if (a.length === 0 || b.length === 0) return 0;
-  const bSet = new Set(b);
-  const shared = a.filter((token) => bSet.has(token)).length;
-  return shared / Math.min(a.length, b.length);
-}
-
-function findPotentialDuplicate(title: string, text: string, existing: Decision[], threshold = 0.6) {
-  const newTitleWords = significantWords(title);
-  const newBodyWords = significantWords(`${title} ${text.slice(0, 200)}`);
-  let best: { decision: Decision; score: number } | undefined;
-  for (const decision of existing) {
-    if (decision.archived) continue;
-    const titleScore = overlapRatio(newTitleWords, significantWords(decision.title));
-    const bodyScore = overlapRatio(newBodyWords, significantWords(`${decision.title} ${decision.text.slice(0, 200)}`));
-    const score = Math.max(titleScore, bodyScore);
-    if (score > (best?.score ?? 0)) best = { decision, score };
-  }
-  return best && best.score > threshold ? best : undefined;
 }
 
 function renderFull(decision: Decision) {
@@ -323,125 +127,6 @@ async function recordToolUsage(tool: string, cwd: string, resultCount: number, e
     resultCount,
     ...extra,
   }).catch(() => undefined);
-}
-
-async function runGit(cwd: string, args: string[]) {
-  await mkdir(cwd, { recursive: true });
-  try {
-    const { stdout, stderr } = await execFileAsync("git", args, { cwd, maxBuffer: 1_000_000 });
-    return { ok: true, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
-  } catch (error: any) {
-    return { ok: false, stdout: String(error?.stdout ?? ""), stderr: String(error?.stderr ?? error?.message ?? "") };
-  }
-}
-
-async function isGitRepo(cwd: string) {
-  return (await runGit(cwd, ["rev-parse", "--is-inside-work-tree"])).stdout.trim() === "true";
-}
-
-const MEMORY_GIT_IGNORE = [".lock/", "*.tmp", "injections.jsonl", "tool-usage.jsonl", "", "# injection / tool-usage logs are local-only analysis state", ""];
-
-async function ensureMemoryGit() {
-  await store.ensure();
-  await mkdir(MEMORY_DIR, { recursive: true });
-  if (!(await isGitRepo(MEMORY_DIR))) {
-    let init = await runGit(MEMORY_DIR, ["init", "-b", "main"]);
-    if (!init.ok) init = await runGit(MEMORY_DIR, ["init"]);
-    if (!init.ok) return init;
-  }
-  const ignorePath = join(MEMORY_DIR, ".gitignore");
-  if (!existsSync(ignorePath)) await writeFile(ignorePath, MEMORY_GIT_IGNORE.join("\n"), "utf8");
-  return { ok: true, stdout: "", stderr: "" };
-}
-
-async function memoryCheckpoint(reason: string) {
-  const init = await ensureMemoryGit();
-  if (!init.ok) return { committed: false, pushed: false, message: `git init failed: ${init.stderr}` };
-  await runGit(MEMORY_DIR, ["add", "--all", "--", "."]);
-  const diff = await runGit(MEMORY_DIR, ["diff", "--cached", "--quiet"]);
-  if (diff.ok) return { committed: false, pushed: false, message: "memory git: clean" };
-  const commit = await runGit(MEMORY_DIR, ["commit", "-m", `pi-memory: ${reason.slice(0, 160)}`]);
-  if (!commit.ok) return { committed: false, pushed: false, message: `commit failed: ${commit.stderr}` };
-  return { committed: true, pushed: false, message: commit.stdout.trim() || "committed" };
-}
-
-async function memoryStatus() {
-  if (!(await isGitRepo(MEMORY_DIR))) return "memory store is not a git repository";
-  const status = await runGit(MEMORY_DIR, ["status", "--short", "--branch"]);
-  return status.ok ? status.stdout.trim() : status.stderr.trim();
-}
-
-function safeFilePart(text: string) {
-  return (text.split(/(?<=[.!?])\s+/)[0] ?? text)
-    .replace(/[\\/:*?"<>|#^[\]]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80) || "memory";
-}
-
-function yamlString(value: string) {
-  return JSON.stringify(value);
-}
-
-function promotionFolder(decision: Decision) {
-  return decision.tags.some((t) => ["preference", "decision"].includes(t)) || decision.source === "manual" ? VAULT_MEMORY_DIR : VAULT_KB_DIR;
-}
-
-// Promotion is an optional bridge to a Markdown vault directory. If the vault
-// root is absent we skip rather than mkdir a stray tree, so the store stays
-// self-contained when no vault is configured. Returns undefined when missing.
-async function writeVaultNote(decision: Decision, forcedFolder?: string): Promise<string | undefined> {
-  if (!existsSync(VAULT_DIR)) return undefined;
-  const folder = forcedFolder ?? promotionFolder(decision);
-  const relPath = `${folder}/Lodestone - ${safeFilePart(decision.title)} - ${decision.id}.md`;
-  const fullPath = join(VAULT_DIR, relPath);
-  await mkdir(dirname(fullPath), { recursive: true });
-  if (!existsSync(fullPath)) {
-    const tags = [...new Set(["agent-memory", "pi-memory", ...decision.tags])].map((t) => t.replace(/[^A-Za-z0-9_/-]/g, "-"));
-    const body = [
-      "---",
-      `title: ${yamlString(decision.title)}`,
-      `created: ${decision.createdAt.slice(0, 10)}`,
-      `updated: ${new Date().toISOString().slice(0, 10)}`,
-      "tags:",
-      ...tags.map((t) => `  - ${t}`),
-      `pi_memory_id: ${yamlString(decision.id)}`,
-      `pi_memory_project: ${yamlString(decision.project)}`,
-      "---",
-      `# ${decision.title}`,
-      "",
-      decision.text,
-      "",
-    ].join("\n");
-    await writeFile(fullPath, body, "utf8");
-  }
-  return relPath;
-}
-
-function compactTurnText(messages: any[]) {
-  const userText = messages.filter((m) => m.role === "user").map((m) => textFromContent(m.content)).filter(Boolean).at(-1) ?? "";
-  const assistantText = messages.filter((m) => m.role === "assistant").map((m) => textFromContent(m.content)).filter(Boolean).at(-1) ?? "";
-  return {
-    userText,
-    assistantText,
-    text: sanitize([
-      userText && `User:\n${truncate(userText, TURN_USER_MAX_CHARS)}`,
-      assistantText && `Assistant:\n${truncate(assistantText, TURN_ASSISTANT_MAX_CHARS)}`,
-    ].filter(Boolean).join("\n\n")),
-  };
-}
-
-function hasDurableSignal(text: string) {
-  return /\b(decision|decided|remember|preference|prefer|always|never|do not|don't|root cause|workflow|architecture|migration|policy|target state|review gate|semi-automatic)\b/i.test(text);
-}
-
-function decisionStatementFromTurn(text: string): string | undefined {
-  const candidates = text
-    .split(/\n+/)
-    .map((line) => line.replace(/^(User|Assistant):\s*/i, "").trim())
-    .filter((line) => line.length >= 30 && line.length <= 500)
-    .filter((line) => /\b(decision|decided|prefer|preference|always|never|do not|don't|should|target state|architecture|workflow|review gate|semi-automatic|use .+ because)\b/i.test(line));
-  return candidates[0]?.slice(0, 500);
 }
 
 function runSelfTests() {

@@ -4,9 +4,10 @@ This is a Pi coding agent extension that provides persistent, local-LLM-friendly
 
 ## Entry point
 
-`extension/index.ts` is the Pi extension entry point. It:
+`extension/index.ts` is the Pi extension entry point. It is orchestration only —
+tool/command/hook wiring — delegating helper logic to focused sibling modules. It:
 
-1. Creates a `DecisionStore` backed by `~/.pi/agent/memory/decisions.jsonl`.
+1. Uses the shared `DecisionStore` singleton (`extension/store-instance.ts`) backed by `~/.pi/agent/memory/decisions.jsonl`.
 2. Registers three tools: `memory-search`, `memory-get`, `memory-add`.
 3. Registers the `/memory` slash command with subcommands.
 4. Subscribes to Pi event hooks: `session_start`, `before_agent_start`, `context`, `agent_end`.
@@ -34,9 +35,19 @@ tool call / slash   ← read/write decisions via DecisionStore
 
 | File | Role |
 |---|---|
-| `extension/index.ts` | Extension registration, tools, slash commands, event hooks, sanitization |
+| `extension/index.ts` | Extension registration, tools, slash commands, event hooks (orchestration) |
+| `extension/config.ts` | Environment-variable configuration resolved in one place |
+| `extension/store-instance.ts` | Shared `DecisionStore` singleton |
 | `extension/storage.ts` | `DecisionStore` — JSONL file, locking, atomic writes, mtime cache |
 | `extension/scoring.ts` | Tokenization, project scoping, deterministic `scoreDecision` |
+| `extension/sanitize.ts` | `<private>` stripping and secret masking |
+| `extension/text.ts` | Content extraction, truncation, query-aware excerpts, output caps |
+| `extension/preamble.ts` | Inject memory block onto the latest user message |
+| `extension/dedup.ts` | Lexical near-duplicate detection for `memory-add` |
+| `extension/turn.ts` | Turn-capture helpers (durable-signal / decision-statement extraction) |
+| `extension/git.ts` | Optional off-hot-path git checkpointing |
+| `extension/vault.ts` | Optional Markdown-vault export |
+| `extension/staleness.ts` | Review-only staleness analysis |
 | `extension/injection-log.ts` | Append-only diagnostic logs for injection and tool usage |
 | `extension/migrate.ts` | One-time migration from legacy `observations.jsonl` |
 | `extension/types.ts` | Shared data model |

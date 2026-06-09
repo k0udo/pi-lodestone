@@ -89,7 +89,7 @@ Users should use `<private>...</private>` tags for anything not covered by the b
 
 To add a new secret pattern:
 
-1. Add a new `.replace()` call in `maskSecrets()` in `extension/index.ts`.
+1. Add a new `.replace()` call in `maskSecrets()` in `extension/sanitize.ts`.
 2. Use a specific regex — avoid overly broad patterns that might false-positive on normal text.
 3. Test with `tests/` to ensure the pattern works as expected.
 4. Document the new pattern in this file.
