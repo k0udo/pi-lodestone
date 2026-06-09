@@ -1,6 +1,6 @@
 {
   "name": "pi-lodestone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent memory for the Pi coding agent, tuned for local LLMs. Curated decisions, preferences, and workflows that survive future sessions, with cheap context-aware injection.",
   "type": "module",
   "keywords": [
@@ -21,8 +21,12 @@
     "url": "https://github.com/k0udo/pi-lodestone/issues"
   },
   "pi": {
-    "extensions": ["./extension/index.ts"],
-    "skills": ["./skills/lodestone"]
+    "extensions": [
+      "./extension/index.ts"
+    ],
+    "skills": [
+      "./skills/lodestone"
+    ]
   },
   "files": [
     "extension",
