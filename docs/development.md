@@ -78,11 +78,21 @@ npm pack --dry-run
 
 Use `npm pack --dry-run` for package-readiness changes because Pi installs this as an npm package and only files listed in `package.json` `files` will ship.
 
+## Dependencies
+
+Pi bundles its core packages and provides them to extensions at load time. Per Pi's
+`packages.md`, anything imported from `@earendil-works/pi-coding-agent`,
+`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`,
+or `typebox` must be declared in `peerDependencies` with a `"*"` range and **never
+bundled**. Only genuine third-party runtime deps belong in `dependencies`. Keeping the
+Pi core packages as peers is what lets a fresh `pi install npm:pi-lodestone` resolve
+against the user's installed Pi instead of shipping a conflicting copy.
+
 ## Release checklist
 
 1. Confirm `README.md` and `skills/lodestone/README.md` describe the same behavior.
 2. Run `npm test`.
-3. Run `npm pack --dry-run` and inspect included files.
-4. Verify `package.json` metadata (`pi.extensions`, `pi.skills`, repository, bugs, keywords, files).
-5. Bump version only when intentionally preparing a release.
-6. Commit with explicit paths; tag/publish/release only after explicit confirmation.
+3. Run `npm pack --dry-run` and inspect included files (no `tests/`, `.github/`, `.agents/`, or `node_modules/`).
+4. Verify `package.json` metadata (`pi.extensions`, `pi.skills`, repository, bugs, keywords, files) and that Pi core packages + `typebox` remain `peerDependencies: "*"` (see Dependencies above).
+5. Bump version with `npm version <x.y.z>` (creates the commit + tag) only when intentionally preparing a release.
+6. `npm publish`, push with `--follow-tags`, and cut a GitHub release only after explicit confirmation.

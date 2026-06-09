@@ -4,3 +4,6 @@ node_modules/
 dist/
 *.tgz
 .pi/
+
+# Local maintainer/agent tooling — kept on disk for maintenance, not published.
+.agents/

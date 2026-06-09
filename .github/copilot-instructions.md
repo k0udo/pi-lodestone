@@ -13,12 +13,15 @@ This repository builds persistent memory for the Pi coding agent and should rema
 
 ## Key files
 
-- `extension/index.ts`: extension registration, tools, slash commands, injection, sanitization.
+- `extension/index.ts`: extension registration, tools, slash commands, event hooks (orchestration only).
+- `extension/config.ts`: environment-variable configuration; `extension/store-instance.ts`: shared store singleton.
 - `extension/scoring.ts`: tokenization and deterministic score logic.
 - `extension/storage.ts`: JSONL store, locks, atomic writes, settings.
+- `extension/sanitize.ts`: `<private>` stripping and secret masking (every write path).
+- `extension/{text,preamble,dedup,turn,git,vault,staleness}.ts`: focused helper modules used by the entrypoint.
 - `skills/lodestone/SKILL.md`: concise model-facing instructions.
 - `skills/lodestone/README.md`: full operational reference.
-- `docs/development.md`: maintainer notes and checklists.
+- `docs/development.md`: maintainer notes and checklists; `docs/wiki/`: architecture/scoring/store/privacy/extension-api reference.
 
 ## Validation
 
