@@ -7,7 +7,7 @@ This section documents how the extension hooks into Pi and how to add new tools,
 The extension is a default export function that receives the Pi `ExtensionAPI`:
 
 ```ts
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function(pi: ExtensionAPI) {
   // register tools, commands, hooks here

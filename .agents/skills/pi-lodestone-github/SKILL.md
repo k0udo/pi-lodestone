@@ -38,12 +38,12 @@ gh run list --repo k0udo/pi-lodestone --limit 20 --json databaseId,status,conclu
 ## Development workflow
 
 1. Search project memory when relevant: `memory-search(query, projectOnly=true)`.
-2. Check repo state with `gitea status`; inspect path-limited diffs before edits.
+2. Check repo state with `git status`; inspect path-limited diffs before edits.
 3. Implement changes.
 4. Run `npm test`.
 5. For package readiness, run `npm pack --dry-run`.
 6. Keep `README.md` and `skills/lodestone/README.md` aligned with user-facing behavior.
-7. If committing, use explicit `gitea add` paths, `gitea check`, then `gitea commit`.
+7. If committing, stage explicit `git add` paths, review with `git diff --cached`, then `git commit`.
 
 ## Package readiness checklist
 
@@ -54,7 +54,7 @@ gh run list --repo k0udo/pi-lodestone --limit 20 --json databaseId,status,conclu
 - `pi.extensions` includes `./extension/index.ts`
 - `pi.skills` includes `./skills/lodestone`
 - `files` includes `extension`, `skills`, `README.md`, and `LICENSE`
-- runtime dependencies needed by the extension are in `dependencies`; Pi core packages remain in `peerDependencies` as appropriate for current Pi docs.
+- Pi-bundled core packages (`@earendil-works/pi-coding-agent`, `typebox`) stay in `peerDependencies` with a `"*"` range and are never bundled (per Pi packages.md); only genuine third-party runtime deps go in `dependencies`.
 
 Use local Pi docs before making detailed claims about packaging requirements:
 

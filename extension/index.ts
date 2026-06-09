@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Decision } from "./types.ts";
 import { DecisionStore, defaultStoreConfig } from "./storage.ts";
