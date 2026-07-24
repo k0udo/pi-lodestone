@@ -69,6 +69,29 @@ When changing storage or data shape:
 [`docs/wiki/`](../wiki/) — architecture, scoring, store, extension API, privacy.
 Useful when modifying any of the core modules.
 
+## Local Pi dev install
+
+For fast iteration, install this checkout directly into Pi instead of waiting for
+an npm publish. Pi local-path packages are loaded from disk without copying, so a
+new Pi session sees source changes from this repo.
+
+```bash
+pi remove npm:pi-lodestone
+pi install /Users/koudo/Repos/pi-lodestone
+pi list
+```
+
+Restart Pi sessions after changing extension or skill files; already-running
+processes keep the code they loaded at startup. Run `npm test` before restarting
+so local sessions do not pick up a broken checkout.
+
+Rollback to the published package:
+
+```bash
+pi remove /Users/koudo/Repos/pi-lodestone
+pi install npm:pi-lodestone
+```
+
 ## Commands before review
 
 ```bash
