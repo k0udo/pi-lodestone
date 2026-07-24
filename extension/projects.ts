@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { projectRoot } from "./scoring.ts";
 import type { ProjectRecord, ProjectRegistry } from "./types.ts";
 
@@ -24,6 +24,19 @@ function cleanName(name: string) {
   return name.replace(/\s+/g, " ").trim();
 }
 
+function normalizePath(path: string) {
+  return resolve(path).replace(/\/+$/g, "") || "/";
+}
+
+function normalizePaths(paths: unknown) {
+  return Array.isArray(paths) ? [...new Set(paths.filter(Boolean).map((p) => normalizePath(String(p))))].sort() : [];
+}
+
+function pathIsInsideRoot(path: string, root: string) {
+  const rel = relative(root, path);
+  return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
+}
+
 function normalizeRegistry(value: unknown): ProjectRegistry {
   const input = (value && typeof value === "object") ? value as Partial<ProjectRegistry> : {};
   const projects = Array.isArray(input.projects)
@@ -32,7 +45,9 @@ function normalizeRegistry(value: unknown): ProjectRegistry {
       name: p.name,
       createdAt: p.createdAt,
       updatedAt: p.updatedAt ?? p.createdAt,
-      roots: Array.isArray(p.roots) ? [...new Set(p.roots.filter(Boolean))].sort() : [],
+      roots: normalizePaths(p.roots),
+      contextPaths: normalizePaths(p.contextPaths),
+      artifactPaths: normalizePaths(p.artifactPaths),
       archived: p.archived ?? false,
     }))
     : [];
@@ -40,6 +55,15 @@ function normalizeRegistry(value: unknown): ProjectRegistry {
     ? input.activeProjectId
     : undefined;
   return { activeProjectId, projects };
+}
+
+function removeByRef(items: string[], ref: string) {
+  const clean = cleanName(ref);
+  const numeric = /^\d+$/.test(clean) ? Number(clean) : undefined;
+  const target = numeric ? items[numeric - 1] : normalizePath(clean);
+  if (!target) return { next: items, removed: undefined };
+  const next = items.filter((item) => item !== target);
+  return { next, removed: next.length === items.length ? undefined : target };
 }
 
 export class ProjectStore {
@@ -67,6 +91,25 @@ export class ProjectStore {
       await unlink(tmp).catch(() => undefined);
       throw error;
     }
+  }
+
+  private async commit(registry: ProjectRegistry) {
+    await this.writeAtomic(registry);
+    this.cache = { mtimeMs: (await stat(this.config.path)).mtimeMs, registry };
+  }
+
+  private findById(registry: ProjectRegistry, projectId: string) {
+    return registry.projects.find((p) => p.id === projectId && !p.archived);
+  }
+
+  private updateProject(registry: ProjectRegistry, projectId: string, update: (project: ProjectRecord) => ProjectRecord): ProjectRegistry | undefined {
+    let changed = false;
+    const projects = registry.projects.map((project) => {
+      if (project.id !== projectId || project.archived) return project;
+      changed = true;
+      return update(project);
+    });
+    return changed ? { ...registry, projects } : undefined;
   }
 
   async ensure() {
@@ -102,8 +145,7 @@ export class ProjectStore {
       const existing = registry.projects.find((p) => p.name.toLowerCase() === clean.toLowerCase() && !p.archived);
       if (existing) {
         const next = { ...registry, activeProjectId: existing.id };
-        await this.writeAtomic(next);
-        this.cache = { mtimeMs: (await stat(this.config.path)).mtimeMs, registry: next };
+        await this.commit(next);
         return existing;
       }
       const now = new Date().toISOString();
@@ -113,11 +155,12 @@ export class ProjectStore {
         createdAt: now,
         updatedAt: now,
         roots: cwd ? [projectRoot(cwd)] : [],
+        contextPaths: [],
+        artifactPaths: [],
         archived: false,
       };
       const next = { activeProjectId: project.id, projects: [...registry.projects, project] };
-      await this.writeAtomic(next);
-      this.cache = { mtimeMs: (await stat(this.config.path)).mtimeMs, registry: next };
+      await this.commit(next);
       return project;
     });
   }
@@ -130,9 +173,83 @@ export class ProjectStore {
       const target = registry.projects.find((p) => !p.archived && (p.id === clean || p.name.toLowerCase() === clean.toLowerCase()));
       if (!target) return undefined;
       const next = { ...registry, activeProjectId: target.id };
-      await this.writeAtomic(next);
-      this.cache = { mtimeMs: (await stat(this.config.path)).mtimeMs, registry: next };
+      await this.commit(next);
       return target;
+    });
+  }
+
+  async resolveForCwd(cwd: string): Promise<ProjectRecord | undefined> {
+    const registry = await this.read();
+    const path = normalizePath(cwd);
+    return registry.projects
+      .filter((p) => !p.archived)
+      .flatMap((project) => project.roots.map((root) => ({ project, root })))
+      .filter(({ root }) => pathIsInsideRoot(path, root))
+      .sort((a, b) => b.root.length - a.root.length || a.project.name.localeCompare(b.project.name))[0]?.project;
+  }
+
+  async activateForCwd(cwd: string): Promise<ProjectRecord | undefined> {
+    const project = await this.resolveForCwd(cwd);
+    if (!project) return undefined;
+    await this.setActiveProjectId(project.id);
+    return project;
+  }
+
+  async addRoot(projectId: string, path: string): Promise<ProjectRecord | undefined> {
+    const root = normalizePath(path);
+    return this.withMutation(async () => {
+      const registry = await this.read();
+      const next = this.updateProject(registry, projectId, (project) => ({
+        ...project,
+        roots: [...new Set([...project.roots, root])].sort(),
+        updatedAt: new Date().toISOString(),
+      }));
+      if (!next) return undefined;
+      await this.commit(next);
+      return this.findById(next, projectId);
+    });
+  }
+
+  async removeRoot(projectId: string, ref: string): Promise<{ project?: ProjectRecord; removed?: string }> {
+    return this.withMutation(async () => {
+      const registry = await this.read();
+      const project = this.findById(registry, projectId);
+      if (!project) return {};
+      const { next: roots, removed } = removeByRef(project.roots, ref);
+      if (!removed) return { project };
+      const next = this.updateProject(registry, projectId, (p) => ({ ...p, roots, updatedAt: new Date().toISOString() }));
+      if (!next) return { project };
+      await this.commit(next);
+      return { project: this.findById(next, projectId), removed };
+    });
+  }
+
+  async addContextPath(projectId: string, path: string): Promise<ProjectRecord | undefined> {
+    const contextPath = normalizePath(path);
+    return this.withMutation(async () => {
+      const registry = await this.read();
+      const next = this.updateProject(registry, projectId, (project) => ({
+        ...project,
+        contextPaths: [...new Set([...(project.contextPaths ?? []), contextPath])].sort(),
+        updatedAt: new Date().toISOString(),
+      }));
+      if (!next) return undefined;
+      await this.commit(next);
+      return this.findById(next, projectId);
+    });
+  }
+
+  async removeContextPath(projectId: string, ref: string): Promise<{ project?: ProjectRecord; removed?: string }> {
+    return this.withMutation(async () => {
+      const registry = await this.read();
+      const project = this.findById(registry, projectId);
+      if (!project) return {};
+      const { next: contextPaths, removed } = removeByRef(project.contextPaths ?? [], ref);
+      if (!removed) return { project };
+      const next = this.updateProject(registry, projectId, (p) => ({ ...p, contextPaths, updatedAt: new Date().toISOString() }));
+      if (!next) return { project };
+      await this.commit(next);
+      return { project: this.findById(next, projectId), removed };
     });
   }
 
@@ -141,8 +258,7 @@ export class ProjectStore {
       const registry = await this.read();
       const activeProjectId = projectId && registry.projects.some((p) => p.id === projectId && !p.archived) ? projectId : undefined;
       const next = { ...registry, activeProjectId };
-      await this.writeAtomic(next);
-      this.cache = { mtimeMs: (await stat(this.config.path)).mtimeMs, registry: next };
+      await this.commit(next);
     });
   }
 }

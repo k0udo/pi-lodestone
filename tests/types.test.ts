@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import type { Decision } from "../extension/types.ts";
+import type { Decision, ProjectRecord } from "../extension/types.ts";
 
 function makeBaseDecision(overrides?: Partial<Decision>): Decision {
   return {
@@ -29,6 +29,21 @@ function runTest(name: string, fn: () => void) {
     throw error;
   }
 }
+
+runTest("ProjectRecord schema - context and artifact paths", () => {
+  const project: ProjectRecord = {
+    id: "prj_test",
+    name: "Test Project",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    roots: ["/repos/test"],
+    contextPaths: ["/repos/test/README.md"],
+    artifactPaths: ["/repos/test/docs/design.md"],
+    archived: false,
+  };
+  assert.deepEqual(project.contextPaths, ["/repos/test/README.md"]);
+  assert.deepEqual(project.artifactPaths, ["/repos/test/docs/design.md"]);
+});
 
 runTest("Decision schema - backward compatibility", () => {
   // Old-style decision (without new fields) should still be valid

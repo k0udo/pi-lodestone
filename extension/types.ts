@@ -6,6 +6,8 @@ export type ProjectRecord = {
   createdAt: string;
   updatedAt: string;
   roots: string[];
+  contextPaths?: string[];
+  artifactPaths?: string[];
   archived: boolean;
 };
 

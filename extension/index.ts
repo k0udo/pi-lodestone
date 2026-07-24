@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { Decision } from "./types.ts";
+import type { Decision, ProjectRecord, ProjectRegistry } from "./types.ts";
 import {
   AUTO_INJECT,
   AUTO_TURN_CAPTURE,
@@ -230,6 +231,115 @@ async function projectEnabled(cwd: string) {
   return !(projectId && (settings.disabledProjectIds ?? []).includes(projectId));
 }
 
+function resolveProjectPath(cwd: string, path: string | undefined) {
+  const raw = path?.trim() || cwd;
+  return resolve(cwd, raw);
+}
+
+function numbered(items: string[] | undefined, empty: string) {
+  return items?.length ? items.map((item, i) => `${i + 1}. ${item}`) : [`- ${empty}`];
+}
+
+function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecord | undefined, activeId: string | undefined, cwd: string, decisions: Decision[]) {
+  const projects = registry.projects.filter((p) => !p.archived);
+  const pinned = selected ? decisions.filter((d) => !d.archived && d.important && d.projectId === selected.id) : [];
+  return [
+    `Project dashboard${selected ? `: ${selected.name}` : ""}`,
+    `cwd: ${cwd}`,
+    "",
+    "Projects:",
+    ...(projects.length ? projects.map((p, i) => `${p.id === selected?.id ? "›" : " "} ${p.id === activeId ? "*" : " "} ${i + 1}. ${p.name} [${p.id}]`) : ["- No projects. Press n or run /project new <name>."]),
+    "",
+    selected ? `Selected: ${selected.name} (${selected.id})${selected.id === activeId ? " — active" : ""}` : "Selected: none",
+    "Linked folders:",
+    ...numbered(selected?.roots, "No folders linked."),
+    "Context / artifacts:",
+    ...numbered(selected?.contextPaths, "No context paths linked."),
+    "Related sessions:",
+    "- Session capture not enabled yet.",
+    "Pinned memories:",
+    ...(pinned.length ? pinned.slice(0, 8).map((d) => `- [${d.id}] ★ ${d.title}`) : ["- No pinned memories for this project."]),
+    "",
+    "Keys: ↑↓ browse · enter switch · n new · a add folder · r remove folder · c add context · x remove context · q close",
+  ];
+}
+
+function truncatePlain(line: string, width: number) {
+  return line.length <= width ? line : `${line.slice(0, Math.max(0, width - 1))}…`;
+}
+
+function borderedLines(title: string, body: string[], width: number) {
+  const safeWidth = Math.max(50, width);
+  const innerWidth = safeWidth - 2;
+  const label = ` ${truncatePlain(title, Math.max(1, innerWidth - 4))} `;
+  const topFill = Math.max(0, innerWidth - label.length - 1);
+  const top = `╭─${label}${"─".repeat(topFill)}╮`;
+  const bottom = `╰${"─".repeat(innerWidth)}╯`;
+  return [top, ...body.map((line) => `│${truncatePlain(line, innerWidth).padEnd(innerWidth)}│`), bottom];
+}
+
+type DashboardAction = "use" | "new" | "add-root" | "remove-root" | "add-context" | "remove-context";
+
+async function showProjectDashboard(ctx: any) {
+  if (ctx.mode !== "tui") {
+    const registry = await projectStore.read();
+    const active = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
+    ctx.ui.setWidget("pi-project", projectDashboardLines(registry, active, registry.activeProjectId, ctx.cwd, await store.all()), { placement: "belowEditor" });
+    return;
+  }
+
+  while (true) {
+    const registry = await projectStore.read();
+    const projects = registry.projects.filter((p) => !p.archived);
+    let selectedIndex = Math.max(0, projects.findIndex((p) => p.id === registry.activeProjectId));
+    const decisions = await store.all();
+    const result = await ctx.ui.custom<{ action: DashboardAction; projectId?: string } | null>((tui: any, _theme: any, _kb: any, done: (value: { action: DashboardAction; projectId?: string } | null) => void) => ({
+      render(width: number) {
+        const selected = projects[selectedIndex];
+        const body = projectDashboardLines(registry, selected, registry.activeProjectId, ctx.cwd, decisions);
+        return borderedLines(selected ? `Project: ${selected.name}` : "Project dashboard", body, width);
+      },
+      invalidate() {},
+      handleInput(data: string) {
+        if (data === "\u001b" || data === "q") return done(null);
+        if (data === "\u001b[A") selectedIndex = Math.max(0, selectedIndex - 1);
+        else if (data === "\u001b[B") selectedIndex = Math.min(projects.length - 1, selectedIndex + 1);
+        else if (data === "\r" || data === "\n") return done({ action: "use", projectId: projects[selectedIndex]?.id });
+        else if (data === "n") return done({ action: "new" });
+        else if (data === "a") return done({ action: "add-root", projectId: projects[selectedIndex]?.id });
+        else if (data === "r") return done({ action: "remove-root", projectId: projects[selectedIndex]?.id });
+        else if (data === "c") return done({ action: "add-context", projectId: projects[selectedIndex]?.id });
+        else if (data === "x") return done({ action: "remove-context", projectId: projects[selectedIndex]?.id });
+        tui.requestRender();
+      },
+    }), { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%", minWidth: 70 } });
+
+    if (!result) return;
+    if (result.action === "new") {
+      const name = await ctx.ui.input("New project name:");
+      if (name) await projectStore.create(name, ctx.cwd);
+    } else if (result.action === "use" && result.projectId) {
+      await projectStore.use(result.projectId);
+      await updateProjectStatus(ctx);
+    } else if (result.action === "add-root" && result.projectId) {
+      const path = await ctx.ui.input("Folder to link:", ctx.cwd);
+      if (path) await projectStore.addRoot(result.projectId, resolveProjectPath(ctx.cwd, path));
+    } else if (result.action === "remove-root" && result.projectId) {
+      const project = (await projectStore.read()).projects.find((p) => p.id === result.projectId);
+      const choice = await ctx.ui.select("Remove linked folder:", project?.roots ?? []);
+      if (choice) await projectStore.removeRoot(result.projectId, choice);
+    } else if (result.action === "add-context" && result.projectId) {
+      const path = await ctx.ui.input("Context/artifact path:", ctx.cwd);
+      if (path) await projectStore.addContextPath(result.projectId, resolveProjectPath(ctx.cwd, path));
+    } else if (result.action === "remove-context" && result.projectId) {
+      const project = (await projectStore.read()).projects.find((p) => p.id === result.projectId);
+      const choice = await ctx.ui.select("Remove context/artifact path:", project?.contextPaths ?? []);
+      if (choice) await projectStore.removeContextPath(result.projectId, choice);
+    }
+    await updateProjectStatus(ctx);
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   let pendingMemoryPreamble: string | undefined;
 
@@ -320,15 +430,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("project", {
-    description: "Manage Lodestone project identity: list|new <name>|use <name|id>",
+    description: "Open Lodestone project dashboard; manage linked folders and context paths.",
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/);
       await projectStore.ensure();
 
-      if (!sub) {
-        const registry = await projectStore.read();
-        const active = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
-        ctx.ui.notify(active ? `Active project: ${active.name} (${active.id})` : `No active project. Current cwd looks like: ${projectName(ctx.cwd)}`, "info");
+      if (!sub || sub === "dashboard") {
+        await showProjectDashboard(ctx);
         return;
       }
 
@@ -371,7 +479,75 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("Usage: /project [list|new <name>|use <name|id>]", "warning");
+      if (sub === "root") {
+        const action = rest[0];
+        const active = await projectStore.active();
+        if (!active) {
+          ctx.ui.notify("No active project. Run /project new <name> first.", "warning");
+          return;
+        }
+        if (action === "add") {
+          const path = resolveProjectPath(ctx.cwd, rest.slice(1).join(" "));
+          const project = await projectStore.addRoot(active.id, path);
+          await updateProjectStatus(ctx);
+          ctx.ui.notify(project ? `Linked folder: ${path}` : "Could not update project.", project ? "success" : "warning");
+          return;
+        }
+        if (action === "remove") {
+          const ref = rest.slice(1).join(" ").trim();
+          if (!ref) {
+            ctx.ui.notify("Usage: /project root remove <n|path>", "warning");
+            return;
+          }
+          const result = await projectStore.removeRoot(active.id, ref);
+          ctx.ui.notify(result.removed ? `Removed linked folder: ${result.removed}` : `Linked folder not found: ${ref}`, result.removed ? "success" : "warning");
+          return;
+        }
+        if (action === "list") {
+          ctx.ui.setWidget("pi-project", [`Linked folders for ${active.name}:`, ...numbered(active.roots, "No folders linked.")], { placement: "belowEditor" });
+          return;
+        }
+        ctx.ui.notify("Usage: /project root add [path]|remove <n|path>|list", "warning");
+        return;
+      }
+
+      if (sub === "context") {
+        const action = rest[0];
+        const active = await projectStore.active();
+        if (!active) {
+          ctx.ui.notify("No active project. Run /project new <name> first.", "warning");
+          return;
+        }
+        if (action === "add") {
+          const rawPath = rest.slice(1).join(" ").trim();
+          if (!rawPath) {
+            ctx.ui.notify("Usage: /project context add <path>", "warning");
+            return;
+          }
+          const path = resolveProjectPath(ctx.cwd, rawPath);
+          const project = await projectStore.addContextPath(active.id, path);
+          ctx.ui.notify(project ? `Linked context path: ${path}` : "Could not update project.", project ? "success" : "warning");
+          return;
+        }
+        if (action === "remove") {
+          const ref = rest.slice(1).join(" ").trim();
+          if (!ref) {
+            ctx.ui.notify("Usage: /project context remove <n|path>", "warning");
+            return;
+          }
+          const result = await projectStore.removeContextPath(active.id, ref);
+          ctx.ui.notify(result.removed ? `Removed context path: ${result.removed}` : `Context path not found: ${ref}`, result.removed ? "success" : "warning");
+          return;
+        }
+        if (action === "list") {
+          ctx.ui.setWidget("pi-project", [`Context / artifacts for ${active.name}:`, ...numbered(active.contextPaths, "No context paths linked.")], { placement: "belowEditor" });
+          return;
+        }
+        ctx.ui.notify("Usage: /project context add <path>|remove <n|path>|list", "warning");
+        return;
+      }
+
+      ctx.ui.notify("Usage: /project [dashboard|list|new <name>|use <name|id>|root add|remove|list|context add|remove|list]", "warning");
     },
   });
 
@@ -785,6 +961,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     await store.ensure();
     await projectStore.ensure();
+    await projectStore.activateForCwd(ctx.cwd);
     if (ctx.hasUI) {
       ctx.ui.setStatus("pi-memory", "mem:on");
       await updateProjectStatus(ctx);

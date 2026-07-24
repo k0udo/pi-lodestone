@@ -65,6 +65,61 @@ test("use switches by name or id and ignores missing refs", async () => {
   }
 });
 
+test("resolveForCwd chooses the most specific linked root", async () => {
+  const { store, dir } = await tempProjectStore();
+  try {
+    const broad = await store.create("Broad", "/repos/workspace");
+    const specific = await store.create("Specific", "/repos/specific");
+    await store.addRoot(specific.id, "/repos/workspace/app");
+    assert.equal((await store.resolveForCwd("/repos/workspace/app/src"))?.id, specific.id);
+    assert.equal((await store.resolveForCwd("/repos/workspace/docs"))?.id, broad.id);
+    assert.equal(await store.resolveForCwd("/repos/workspace-other"), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("activateForCwd switches active project when cwd is inside a linked root", async () => {
+  const { store, dir } = await tempProjectStore();
+  try {
+    const first = await store.create("First", "/repos/first");
+    const second = await store.create("Second", "/repos/second");
+    assert.equal((await store.active())?.id, second.id);
+    assert.equal((await store.activateForCwd("/repos/first/src"))?.id, first.id);
+    assert.equal((await store.active())?.id, first.id);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("addRoot and removeRoot update linked folders", async () => {
+  const { store, dir } = await tempProjectStore();
+  try {
+    const project = await store.create("Pi Lodestone", "/repos/pi-lodestone");
+    const updated = await store.addRoot(project.id, "/repos/pi-lodestone-fixtures/");
+    assert.deepEqual(updated?.roots, ["/repos/pi-lodestone", "/repos/pi-lodestone-fixtures"]);
+    const removed = await store.removeRoot(project.id, "2");
+    assert.equal(removed.removed, "/repos/pi-lodestone-fixtures");
+    assert.deepEqual(removed.project?.roots, ["/repos/pi-lodestone"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("addContextPath and removeContextPath update project artifacts", async () => {
+  const { store, dir } = await tempProjectStore();
+  try {
+    const project = await store.create("Pi Lodestone", "/repos/pi-lodestone");
+    const updated = await store.addContextPath(project.id, "/repos/pi-lodestone/docs/proposals/projects.md");
+    assert.deepEqual(updated?.contextPaths, ["/repos/pi-lodestone/docs/proposals/projects.md"]);
+    const removed = await store.removeContextPath(project.id, "/repos/pi-lodestone/docs/proposals/projects.md");
+    assert.equal(removed.removed, "/repos/pi-lodestone/docs/proposals/projects.md");
+    assert.deepEqual(removed.project?.contextPaths, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("invalid active project ids are normalized away", async () => {
   const { store, dir } = await tempProjectStore();
   try {
