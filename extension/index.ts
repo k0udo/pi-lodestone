@@ -26,7 +26,8 @@ import {
   VAULT_MEMORY_DIR,
 } from "./config.ts";
 import { store } from "./store-instance.ts";
-import { buildTokenWeights, inferTags, projectName, projectRoot, sameProjectScope, scoreDecision, tokenize } from "./scoring.ts";
+import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from "./scoring.ts";
+import { rankMemoryMatches } from "./retrieval.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
 import { sanitize } from "./sanitize.ts";
@@ -99,17 +100,15 @@ function renderFull(decision: Decision) {
 
 async function search(query: string, options: { limit: number; cwd?: string; projectOnly?: boolean; forInjection?: boolean; minScore?: number; includeArchived?: boolean; snippetChars?: number }) {
   const all = await store.all();
-  const min = options.minScore ?? 1;
-  const candidates = all
-    .filter((d) => options.includeArchived || !d.archived)
-    .filter((d) => !options.projectOnly || !options.cwd || sameProjectScope(d.cwd, options.cwd));
-  const tokenWeights = buildTokenWeights(candidates);
-  return candidates
-    .map((d) => ({ d, score: scoreDecision(d, query, options.cwd, { forInjection: options.forInjection, tokenWeights }) }))
-    .filter((x) => x.score >= min)
-    .sort((a, b) => b.score - a.score || Date.parse(b.d.createdAt) - Date.parse(a.d.createdAt))
+  return rankMemoryMatches(all, query, options.cwd, {
+    forInjection: options.forInjection,
+    minScore: options.minScore ?? 1,
+    projectOnly: options.projectOnly,
+    includeArchived: options.includeArchived,
+    includeSuperseded: !options.forInjection,
+  })
     .slice(0, options.limit)
-    .map((x) => compact(x.d, x.score, query, options.snippetChars ?? SEARCH_SNIPPET_CHARS));
+    .map((x) => compact(x.decision, x.score, query, options.snippetChars ?? SEARCH_SNIPPET_CHARS));
 }
 
 async function bumpUse(ids: string[], usage: "retrieved" | "injected") {
@@ -694,7 +693,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await store.ensure();
-    if (ctx.hasUI) ctx.ui.setStatus("pi-memory", "mem:on");
+    if (ctx.hasUI) {
+      ctx.ui.setStatus("pi-memory", "mem:on");
+      // Make the active project obvious in the status line. Derived from cwd
+      // today; will switch to the manual active project once the registry lands.
+      ctx.ui.setStatus("pi-project", `▸ ${projectName(ctx.cwd)}`);
+    }
   });
 
   pi.on("before_agent_start", async (event, ctx) => {

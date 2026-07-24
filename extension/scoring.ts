@@ -56,6 +56,8 @@ export function buildTokenWeights(decisions: Decision[]): Map<string, number> {
       ...tokenize(decision.title),
       ...decision.tags.flatMap(tokenize),
       ...tokenize(decision.text),
+      ...tokenize(decision.summary ?? ""),
+      ...(decision.details ?? []).flatMap(tokenize),
     ]);
     for (const token of tokens) docFreq.set(token, (docFreq.get(token) ?? 0) + 1);
   }
@@ -88,7 +90,11 @@ export function scoreDecision(
   if (q.length === 0) return 0;
   const titleTokens = new Set(tokenize(decision.title));
   const tagTokens = new Set(decision.tags.flatMap(tokenize));
-  const bodyTokens = new Set(tokenize(decision.text));
+  const bodyTokens = new Set([
+    ...tokenize(decision.text),
+    ...tokenize(decision.summary ?? ""),
+    ...(decision.details ?? []).flatMap(tokenize),
+  ]);
 
   const allDecisionTokens = [...bodyTokens, ...titleTokens, ...tagTokens];
   let lexical = 0;
@@ -141,6 +147,12 @@ export function scoreDecision(
   if (decision.important) score += options.forInjection ? 4 : 8;
   if (decision.source === "manual") score += options.forInjection ? 2 : 4;
   if (decision.kbPath) score += 3;
+  if (decision.confidence === "high") score += options.forInjection ? 2 : 4;
+  else if (decision.confidence === "medium") score += options.forInjection ? 1 : 2;
+  if (decision.freshness === "current") score += 1;
+  else if (decision.freshness === "may_be_stale") score -= options.forInjection ? 1 : 0;
+  else if (decision.freshness === "stale") score -= options.forInjection ? 6 : 3;
+  if (decision.conflictsWith?.length) score -= options.forInjection ? 4 : 2;
   if (!options.forInjection) {
     score += Math.min(decision.retrievalCount, 6);
     score += Math.min(decision.injectionCount, 4);

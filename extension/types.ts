@@ -10,6 +10,12 @@ export type Decision = {
   title: string;
   text: string;
   tags: string[];
+  scope?: "global" | "project" | "repo" | "host" | "tool" | "workflow" | "model" | "engagement";
+  key?: string; // short_snake_case_identifier
+  summary?: string;
+  details?: string[];
+  confidence?: "high" | "medium" | "low";
+  freshness?: "current" | "may_be_stale" | "stale";
   important: boolean;
   archived: boolean;
   kbPath?: string;
@@ -23,7 +29,7 @@ export type Decision = {
   lastInjectedAt?: string;
 };
 
-export type DecisionPatch = Partial<Pick<Decision, "title" | "text" | "tags" | "important" | "archived" | "kbPath" | "supersedes" | "supersededBy" | "conflictsWith" | "lastRetrievedAt" | "lastInjectedAt" | "retrievalCount" | "injectionCount">>;
+export type DecisionPatch = Partial<Pick<Decision, "title" | "text" | "tags" | "scope" | "key" | "summary" | "details" | "confidence" | "freshness" | "important" | "archived" | "kbPath" | "supersedes" | "supersededBy" | "conflictsWith" | "lastRetrievedAt" | "lastInjectedAt" | "retrievalCount" | "injectionCount">>;
 
 export type Settings = {
   disabledProjects?: string[];
