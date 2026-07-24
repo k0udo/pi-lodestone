@@ -54,6 +54,7 @@ runTest("Decision schema - backward compatibility", () => {
 runTest("Decision schema - new fields", () => {
   // Decision with all new fields
   const newStyle: Decision = makeBaseDecision({
+    projectId: "prj_test",
     scope: "project",
     key: "my_project_preference",
     summary: "This is a compact summary of the decision",
@@ -63,6 +64,7 @@ runTest("Decision schema - new fields", () => {
     tags: ["preference", "project"],
   });
 
+  assert.equal(newStyle.projectId, "prj_test");
   assert.equal(newStyle.scope, "project");
   assert.equal(newStyle.key, "my_project_preference");
   assert.equal(newStyle.summary, "This is a compact summary of the decision");
@@ -108,6 +110,7 @@ runTest("DecisionPatch - includes all new fields", () => {
   // Test that DecisionPatch can update new fields
   const decision = makeBaseDecision();
   const patch: Partial<Decision> = {
+    projectId: "prj_updated",
     scope: "workflow",
     key: "updated_key",
     summary: "Updated summary",
@@ -117,6 +120,7 @@ runTest("DecisionPatch - includes all new fields", () => {
   };
 
   const patched = { ...decision, ...patch };
+  assert.equal(patched.projectId, "prj_updated");
   assert.equal(patched.scope, "workflow");
   assert.equal(patched.key, "updated_key");
   assert.equal(patched.summary, "Updated summary");
@@ -130,6 +134,7 @@ runTest("Decision schema - optional fields can be omitted", () => {
     // All new fields intentionally omitted
   });
 
+  assert.equal(minimal.projectId, undefined);
   assert.equal(minimal.scope, undefined);
   assert.equal(minimal.key, undefined);
   assert.equal(minimal.summary, undefined);

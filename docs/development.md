@@ -17,6 +17,7 @@ pi-lodestone is persistent memory for Pi with local LLM operation as the default
 - `extension/config.ts` — all environment-variable configuration (limits, thresholds, paths, flags) resolved in one place.
 - `extension/store-instance.ts` — the shared `DecisionStore` singleton used across modules.
 - `extension/storage.ts` — append-only JSONL decision store, file locking, atomic rewrites, settings, archive/patch helpers.
+- `extension/projects.ts` — sticky project registry (`projects.json`) for active project identity and project roots.
 - `extension/scoring.ts` — tokenization, project scoping, deterministic score calculation, and auto-injection filters.
 - `extension/sanitize.ts` — privacy guards: `<private>` stripping and secret masking applied on every write path.
 - `extension/text.ts` — generic text helpers (content extraction, truncation, query-aware excerpts, output caps).

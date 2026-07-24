@@ -1,11 +1,26 @@
 export type DecisionSource = "manual" | "extracted" | "turn";
 
+export type ProjectRecord = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  roots: string[];
+  archived: boolean;
+};
+
+export type ProjectRegistry = {
+  activeProjectId?: string;
+  projects: ProjectRecord[];
+};
+
 export type Decision = {
   id: string;
   createdAt: string;
   updatedAt: string;
   cwd: string;
   project: string;
+  projectId?: string;
   source: DecisionSource;
   title: string;
   text: string;
@@ -29,8 +44,9 @@ export type Decision = {
   lastInjectedAt?: string;
 };
 
-export type DecisionPatch = Partial<Pick<Decision, "title" | "text" | "tags" | "scope" | "key" | "summary" | "details" | "confidence" | "freshness" | "important" | "archived" | "kbPath" | "supersedes" | "supersededBy" | "conflictsWith" | "lastRetrievedAt" | "lastInjectedAt" | "retrievalCount" | "injectionCount">>;
+export type DecisionPatch = Partial<Pick<Decision, "title" | "text" | "tags" | "projectId" | "scope" | "key" | "summary" | "details" | "confidence" | "freshness" | "important" | "archived" | "kbPath" | "supersedes" | "supersededBy" | "conflictsWith" | "lastRetrievedAt" | "lastInjectedAt" | "retrievalCount" | "injectionCount">>;
 
 export type Settings = {
   disabledProjects?: string[];
+  disabledProjectIds?: string[];
 };

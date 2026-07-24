@@ -124,12 +124,13 @@ test("add preserves foreign writes when cache is stale", async () => {
   }
 });
 
-test("settings round-trip preserves disabledProjects list", async () => {
+test("settings round-trip preserves disabled project lists", async () => {
   const { store, dir } = await tempStore();
   try {
-    await store.writeSettings({ disabledProjects: ["/repos/secret"] });
+    await store.writeSettings({ disabledProjects: ["/repos/secret"], disabledProjectIds: ["prj_secret"] });
     const settings = await store.readSettings();
     assert.deepEqual(settings.disabledProjects, ["/repos/secret"]);
+    assert.deepEqual(settings.disabledProjectIds, ["prj_secret"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

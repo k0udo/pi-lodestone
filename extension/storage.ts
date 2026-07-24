@@ -181,7 +181,10 @@ export class DecisionStore {
 
   async writeSettings(settings: Settings) {
     await this.ensure();
-    await this.writeAtomic(this.config.settingsPath, JSON.stringify({ disabledProjects: settings.disabledProjects ?? [] }, null, 2));
+    await this.writeAtomic(this.config.settingsPath, JSON.stringify({
+      disabledProjects: settings.disabledProjects ?? [],
+      disabledProjectIds: settings.disabledProjectIds ?? [],
+    }, null, 2));
   }
 
   invalidateCache() {

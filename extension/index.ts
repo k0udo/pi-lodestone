@@ -15,6 +15,7 @@ import {
   INJECT_SNIPPET_CHARS,
   INJECTION_LOG_FILE,
   MEMORY_DIR,
+  PROJECTS_FILE,
   MEMORY_GET_MAX_OUTPUT_CHARS,
   SEARCH_DEFAULT_LIMIT,
   SEARCH_SNIPPET_CHARS,
@@ -28,6 +29,7 @@ import {
 import { store } from "./store-instance.ts";
 import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from "./scoring.ts";
 import { rankMemoryMatches } from "./retrieval.ts";
+import { ProjectStore } from "./projects.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
 import { sanitize } from "./sanitize.ts";
@@ -38,6 +40,8 @@ import { compactTurnText, decisionStatementFromTurn, hasDurableSignal } from "./
 import { ensureMemoryGit, memoryCheckpoint, memoryStatus, runGit } from "./git.ts";
 import { writeVaultNote } from "./vault.ts";
 import { renderStaleness, staleMemories } from "./staleness.ts";
+
+const projectStore = new ProjectStore({ path: PROJECTS_FILE });
 
 const INJECTION_QUERY_STOP_WORDS = new Set([
   "again", "another", "assessment", "begin", "changes", "check", "closing", "commit", "complete",
@@ -207,9 +211,23 @@ function runSelfTests() {
   return { passed: tests.length - failures.length, failed: failures.length, failures };
 }
 
+async function activeProjectId() {
+  return (await projectStore.active())?.id;
+}
+
+async function activeProjectLabel(cwd: string) {
+  return (await projectStore.active())?.name ?? projectName(cwd);
+}
+
+async function updateProjectStatus(ctx: any) {
+  if (ctx.hasUI) ctx.ui.setStatus("pi-project", `▸ ${await activeProjectLabel(ctx.cwd)}`);
+}
+
 async function projectEnabled(cwd: string) {
   const settings = await store.readSettings();
-  return !(settings.disabledProjects ?? []).includes(cwd);
+  if ((settings.disabledProjects ?? []).includes(cwd)) return false;
+  const projectId = await activeProjectId();
+  return !(projectId && (settings.disabledProjectIds ?? []).includes(projectId));
 }
 
 export default function (pi: ExtensionAPI) {
@@ -275,12 +293,14 @@ export default function (pi: ExtensionAPI) {
       const now = new Date().toISOString();
       const title = sanitize(params.title);
       const text = sanitize(params.text);
+      const projectId = await activeProjectId();
       const decision: Decision = {
         id: makeId(),
         createdAt: now,
         updatedAt: now,
         cwd: ctx.cwd,
         project: projectName(ctx.cwd),
+        projectId,
         source: "manual",
         title,
         text,
@@ -296,6 +316,62 @@ export default function (pi: ExtensionAPI) {
       const checkpoint = await memoryCheckpoint(`add ${decision.id}`);
       const duplicateWarning = duplicate ? `Potential duplicate: [${duplicate.decision.id}] ${duplicate.decision.title}` : undefined;
       return { content: [{ type: "text" as const, text: [duplicateWarning, `Remembered [${decision.id}] ${decision.title}`, checkpoint.message].filter(Boolean).join("\n") }], details: { id: decision.id, important: decision.important, potentialDuplicateId: duplicate?.decision.id } };
+    },
+  });
+
+  pi.registerCommand("project", {
+    description: "Manage Lodestone project identity: list|new <name>|use <name|id>",
+    handler: async (args, ctx) => {
+      const [sub, ...rest] = args.trim().split(/\s+/);
+      await projectStore.ensure();
+
+      if (!sub) {
+        const registry = await projectStore.read();
+        const active = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
+        ctx.ui.notify(active ? `Active project: ${active.name} (${active.id})` : `No active project. Current cwd looks like: ${projectName(ctx.cwd)}`, "info");
+        return;
+      }
+
+      if (sub === "list") {
+        const registry = await projectStore.read();
+        const activeId = registry.activeProjectId;
+        const projects = registry.projects.filter((p) => !p.archived);
+        const lines = projects.length
+          ? projects.map((p) => `${p.id === activeId ? "*" : " "} ${p.name} [${p.id}]${p.roots.length ? ` — ${p.roots.join(", ")}` : ""}`)
+          : ["No projects registered. Use /project new <name>."];
+        ctx.ui.setWidget("pi-project", lines, { placement: "belowEditor" });
+        return;
+      }
+
+      if (sub === "new") {
+        const name = rest.join(" ").trim();
+        if (!name) {
+          ctx.ui.notify("Usage: /project new <name>", "warning");
+          return;
+        }
+        const project = await projectStore.create(name, ctx.cwd);
+        await updateProjectStatus(ctx);
+        ctx.ui.notify(`Active project: ${project.name} (${project.id})`, "success");
+        return;
+      }
+
+      if (sub === "use") {
+        const ref = rest.join(" ").trim();
+        if (!ref) {
+          ctx.ui.notify("Usage: /project use <name|id>", "warning");
+          return;
+        }
+        const project = await projectStore.use(ref);
+        if (!project) {
+          ctx.ui.notify(`Project not found: ${ref}`, "warning");
+          return;
+        }
+        await updateProjectStatus(ctx);
+        ctx.ui.notify(`Active project: ${project.name} (${project.id})`, "success");
+        return;
+      }
+
+      ctx.ui.notify("Usage: /project [list|new <name>|use <name|id>]", "warning");
     },
   });
 
@@ -377,12 +453,14 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const now = new Date().toISOString();
+        const projectId = await activeProjectId();
         const decision: Decision = {
           id: makeId(),
           createdAt: now,
           updatedAt: now,
           cwd: ctx.cwd,
           project: projectName(ctx.cwd),
+          projectId,
           source: "manual",
           title: sanitize(title),
           text: sanitize(body),
@@ -479,12 +557,14 @@ export default function (pi: ExtensionAPI) {
         const createdIds: string[] = [];
         for (const c of unique) {
           const now = new Date().toISOString();
+          const projectId = await activeProjectId();
           const decision: Decision = {
             id: makeId(),
             createdAt: now,
             updatedAt: now,
             cwd: ctx.cwd,
             project: projectName(ctx.cwd),
+            projectId,
             source: "extracted",
             title: sanitize(c.statement.split(/(?<=[.!?])\s+/)[0]?.slice(0, 90) || "Extracted decision"),
             text: sanitize(c.statement),
@@ -538,12 +618,14 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const now = new Date().toISOString();
+        const projectId = await activeProjectId();
         const decision: Decision = {
           id: makeId(),
           createdAt: now,
           updatedAt: now,
           cwd: ctx.cwd,
           project: projectName(ctx.cwd),
+          projectId,
           source: "turn",
           title,
           text,
@@ -664,6 +746,15 @@ export default function (pi: ExtensionAPI) {
 
       if (sub === "disable-current" || sub === "enable-current") {
         const settings = await store.readSettings();
+        const activeProject = await projectStore.active();
+        if (activeProject) {
+          const disabledProjectIds = new Set(settings.disabledProjectIds ?? []);
+          if (sub === "disable-current") disabledProjectIds.add(activeProject.id);
+          else disabledProjectIds.delete(activeProject.id);
+          await store.writeSettings({ ...settings, disabledProjectIds: [...disabledProjectIds].sort() });
+          ctx.ui.notify(`Pi memory ${sub === "disable-current" ? "disabled" : "enabled"} for project ${activeProject.name}`, "info");
+          return;
+        }
         const disabled = new Set(settings.disabledProjects ?? []);
         if (sub === "disable-current") disabled.add(ctx.cwd);
         else disabled.delete(ctx.cwd);
@@ -693,11 +784,10 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await store.ensure();
+    await projectStore.ensure();
     if (ctx.hasUI) {
       ctx.ui.setStatus("pi-memory", "mem:on");
-      // Make the active project obvious in the status line. Derived from cwd
-      // today; will switch to the manual active project once the registry lands.
-      ctx.ui.setStatus("pi-project", `▸ ${projectName(ctx.cwd)}`);
+      await updateProjectStatus(ctx);
     }
   });
 
@@ -774,12 +864,14 @@ export default function (pi: ExtensionAPI) {
       const statement = decisionStatementFromTurn(text);
       if (!statement) return;
       const now = new Date().toISOString();
+      const projectId = await activeProjectId();
       const decision: Decision = {
         id: makeId(),
         createdAt: now,
         updatedAt: now,
         cwd: ctx.cwd,
         project: projectName(ctx.cwd),
+        projectId,
         source: "turn",
         title: sanitize(statement.split(/(?<=[.!?])\s+/)[0]?.slice(0, 90) || "Captured turn"),
         text: sanitize(statement),

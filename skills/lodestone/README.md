@@ -6,8 +6,9 @@ Kept out of `SKILL.md` so local models don't pay tokens for the full operator ca
 
 Lodestone is intentionally minimal for local-LLM operation:
 
-- **Single store**: `~/.pi/agent/memory/decisions.jsonl`. Append-only, in-process cached, mtime-invalidated on foreign writes.
-- **Minimal lifecycle metadata**: `archived`, `important`, plus optional `supersededBy`/`supersedes`/`conflictsWith` for explicit human-reviewed corrections.
+- **Single decision store**: `~/.pi/agent/memory/decisions.jsonl`. Append-only, in-process cached, mtime-invalidated on foreign writes.
+- **Sticky project registry**: `~/.pi/agent/memory/projects.json` tracks the active project for decision stamping and status-line context.
+- **Minimal lifecycle metadata**: `archived`, `important`, plus optional `projectId`, `supersededBy`/`supersedes`/`conflictsWith` for explicit human-reviewed corrections.
 - **No tool-result auto-capture**: tool calls write no diagnostic usage logs unless `PI_MEMORY_DIAGNOSTIC_LOGS=true`. The local model never pays for a dedupe/append round-trip on every read/edit/bash call.
 - **No agent_end auto-capture by default** (set `PI_MEMORY_AUTO_TURN_CAPTURE=true` to opt in).
 - **No git work on the hot path**: checkpoint and push only on manual `/memory git checkpoint|push` or via a launchd backup job (see below).
@@ -17,6 +18,11 @@ Lodestone is intentionally minimal for local-LLM operation:
 ## Slash commands
 
 ```text
+/project
+/project list
+/project new <name>
+/project use <name|id>
+
 /memory stats
 /memory health
 /memory self-test

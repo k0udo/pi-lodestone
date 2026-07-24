@@ -9,6 +9,7 @@ export const MEMORY_DIR = process.env.PI_MEMORY_DIR ?? join(homedir(), ".pi", "a
 export const INJECTION_LOG_FILE = join(MEMORY_DIR, "injections.jsonl");
 export const TOOL_USAGE_LOG_FILE = join(MEMORY_DIR, "tool-usage.jsonl");
 export const OBSERVATIONS_LOG_FILE = join(MEMORY_DIR, "observations.jsonl");
+export const PROJECTS_FILE = join(MEMORY_DIR, "projects.json");
 
 export const MAX_TEXT_CHARS = Number(process.env.PI_MEMORY_MAX_TEXT_CHARS ?? 4_000);
 export const AUTO_INJECT = (process.env.PI_MEMORY_AUTO_INJECT ?? "true") !== "false";
