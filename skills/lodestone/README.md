@@ -22,6 +22,7 @@ Lodestone is intentionally minimal for local-LLM operation:
 /project list
 /project new <name>
 /project use <name|id>
+/project packet [maxChars]
 /project root add [path]
 /project root remove <n|path>
 /project root list

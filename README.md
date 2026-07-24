@@ -20,8 +20,9 @@ context and every millisecond on the hot path should earn its place.
 pi install npm:pi-lodestone
 ```
 
-This registers the `lodestone` skill plus three tools — `memory-search`,
-`memory-get`, `memory-add` — and a `/memory` slash command.
+This registers the `lodestone` skill plus memory tools (`memory-search`,
+`memory-get`, `memory-project-context`, `memory-add`) and `/memory` + `/project`
+slash commands.
 
 ## What it does
 
@@ -42,6 +43,7 @@ This registers the `lodestone` skill plus three tools — `memory-search`,
 ```text
 memory-search(query, limit?, projectOnly?)   search active memory; returns IDs + snippets
 memory-get(ids, maxChars?)                    fetch full bodies for selected IDs
+memory-project-context(maxChars?)             fetch bounded active project packet
 memory-add(title, text, tags?, important?)    persist a durable decision
 ```
 

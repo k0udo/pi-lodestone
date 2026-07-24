@@ -31,6 +31,7 @@ import { store } from "./store-instance.ts";
 import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from "./scoring.ts";
 import { rankMemoryMatches } from "./retrieval.ts";
 import { ProjectStore } from "./projects.ts";
+import { buildProjectPacket, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
 import { sanitize } from "./sanitize.ts";
@@ -260,7 +261,7 @@ function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecor
     "Pinned memories:",
     ...(pinned.length ? pinned.slice(0, 8).map((d) => `- [${d.id}] ★ ${d.title}`) : ["- No pinned memories for this project."]),
     "",
-    "Keys: ↑↓ browse · enter switch · n new · a add folder · r remove folder · c add context · x remove context · q close",
+    "Keys: ↑↓ browse · enter switch · n new · a add folder · r remove folder · c add context · x remove context · p packet · q close",
   ];
 }
 
@@ -278,7 +279,17 @@ function borderedLines(title: string, body: string[], width: number) {
   return [top, ...body.map((line) => `│${truncatePlain(line, innerWidth).padEnd(innerWidth)}│`), bottom];
 }
 
-type DashboardAction = "use" | "new" | "add-root" | "remove-root" | "add-context" | "remove-context";
+type DashboardAction = "use" | "new" | "add-root" | "remove-root" | "add-context" | "remove-context" | "packet";
+
+async function showProjectPacket(ctx: any, projectId?: string, maxChars = PROJECT_PACKET_DEFAULT_MAX_CHARS) {
+  const registry = await projectStore.read();
+  const project = projectId
+    ? registry.projects.find((p) => p.id === projectId && !p.archived)
+    : registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
+  const packet = buildProjectPacket(project, await store.all(), { maxChars });
+  ctx.ui.setWidget("pi-project-packet", packet.split("\n"), { placement: "belowEditor" });
+  return packet;
+}
 
 async function showProjectDashboard(ctx: any) {
   if (ctx.mode !== "tui") {
@@ -310,6 +321,7 @@ async function showProjectDashboard(ctx: any) {
         else if (data === "r") return done({ action: "remove-root", projectId: projects[selectedIndex]?.id });
         else if (data === "c") return done({ action: "add-context", projectId: projects[selectedIndex]?.id });
         else if (data === "x") return done({ action: "remove-context", projectId: projects[selectedIndex]?.id });
+        else if (data === "p") return done({ action: "packet", projectId: projects[selectedIndex]?.id });
         tui.requestRender();
       },
     }), { overlay: true, overlayOptions: { width: "80%", maxHeight: "90%", minWidth: 70 } });
@@ -335,6 +347,9 @@ async function showProjectDashboard(ctx: any) {
       const project = (await projectStore.read()).projects.find((p) => p.id === result.projectId);
       const choice = await ctx.ui.select("Remove context/artifact path:", project?.contextPaths ?? []);
       if (choice) await projectStore.removeContextPath(result.projectId, choice);
+    } else if (result.action === "packet") {
+      await showProjectPacket(ctx, result.projectId);
+      return;
     }
     await updateProjectStatus(ctx);
   }
@@ -384,6 +399,26 @@ export default function (pi: ExtensionAPI) {
       await recordToolUsage("memory-get", ctx.cwd, found.length, { requestedIds: ids, returnedIds: found.map((d) => d.id) });
       const text = found.length ? capOutput(found.map(renderFull).join("\n\n---\n\n"), maxChars) : "No matching memory IDs.";
       return { content: [{ type: "text" as const, text }], details: { requestedIds: ids, returnedIds: found.map((d) => d.id), maxChars } };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory-project-context",
+    label: "Project Context",
+    description: "Fetch the bounded Lodestone project packet for the active project. References linked files; does not read them.",
+    promptSnippet: "Fetch the current Lodestone project context packet",
+    promptGuidelines: ["Use memory-project-context when project-level folders, artifacts, and pinned decisions would help the current task."],
+    parameters: Type.Object({
+      maxChars: Type.Optional(Type.Number({ description: "Maximum packet characters. Defaults to 1200.", minimum: 500, maximum: 5000 })),
+    }),
+    async execute(_id, params, _signal, _update, ctx) {
+      await projectStore.activateForCwd(ctx.cwd);
+      const registry = await projectStore.read();
+      const project = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
+      const maxChars = clampNumber(params.maxChars, PROJECT_PACKET_DEFAULT_MAX_CHARS, 500, 5_000);
+      const packet = buildProjectPacket(project, await store.all(), { maxChars });
+      await recordToolUsage("memory-project-context", ctx.cwd, project ? 1 : 0, { projectId: project?.id, maxChars });
+      return { content: [{ type: "text" as const, text: packet }], details: { projectId: project?.id, maxChars } };
     },
   });
 
@@ -479,6 +514,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (sub === "packet") {
+        const maxChars = clampNumber(Number(rest[0]), PROJECT_PACKET_DEFAULT_MAX_CHARS, 500, 5_000);
+        await showProjectPacket(ctx, undefined, maxChars);
+        return;
+      }
+
       if (sub === "root") {
         const action = rest[0];
         const active = await projectStore.active();
@@ -547,7 +588,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("Usage: /project [dashboard|list|new <name>|use <name|id>|root add|remove|list|context add|remove|list]", "warning");
+      ctx.ui.notify("Usage: /project [dashboard|list|new <name>|use <name|id>|packet [maxChars]|root add|remove|list|context add|remove|list]", "warning");
     },
   });
 
