@@ -8,6 +8,10 @@ export type ProjectPacketOptions = {
 export const PROJECT_PACKET_DEFAULT_MAX_CHARS = 1_200;
 export const PROJECT_PACKET_DEFAULT_PINNED_LIMIT = 8;
 
+export function joinContextBlocks(blocks: Array<string | undefined>) {
+  return blocks.map((block) => block?.trim()).filter(Boolean).join("\n\n---\n\n");
+}
+
 function listOrPlaceholder(items: string[] | undefined, placeholder: string) {
   return items?.length ? items.map((item) => `- ${item}`) : [`- ${placeholder}`];
 }

@@ -42,6 +42,7 @@ Automatic injection happens often, so treat it as a constrained runtime path:
 - Do not add filesystem writes to normal search/injection unless guarded by an opt-in environment variable.
 - Do not add model calls, embedding generation, or remote services to default scoring.
 - Keep search limits, snippet lengths, and output caps bounded by environment variables with conservative defaults.
+- Keep project packet injection opt-in unless evals prove it improves continuity without wasting context.
 - Prefer mtime-invalidated caches and append-only writes over full-store rewrites when creating new entries.
 - If a feature needs heavier work, expose it as a slash command or explicit tool action instead of running it every turn.
 

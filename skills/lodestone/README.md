@@ -68,6 +68,8 @@ Lodestone is intentionally minimal for local-LLM operation:
 | `PI_MEMORY_INJECT_SNIPPET_CHARS` | `180` | Max query-aware snippet characters per injected memory |
 | `PI_MEMORY_INJECT_QUERY_MAX_TOKENS` | `32` | Max unique prompt tokens used for automatic injection search |
 | `PI_MEMORY_INJECT_PLACEMENT` | `user` | `user` keeps system prompt stable by prefixing latest user message; `system` restores old system-prompt injection |
+| `PI_PROJECT_PACKET_INJECT` | `false` | Opt-in: inject the active project packet alongside lexical memory context |
+| `PI_PROJECT_PACKET_MAX_CHARS` | `1200` | Hard cap for injected project packet characters |
 | `PI_MEMORY_SEARCH_DEFAULT_LIMIT` | `5` | Default `memory-search` and `/memory search` result count |
 | `PI_MEMORY_SEARCH_SNIPPET_CHARS` | `220` | Max query-aware snippet characters per search result |
 | `PI_MEMORY_GET_MAX_OUTPUT_CHARS` | `10000` | Default output cap for `memory-get`; pass `maxChars` for explicit expansion |

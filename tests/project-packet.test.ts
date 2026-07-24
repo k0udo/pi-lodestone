@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { buildProjectPacket } from "../extension/project-packet.ts";
+import { buildProjectPacket, joinContextBlocks } from "../extension/project-packet.ts";
 import type { Decision, ProjectRecord } from "../extension/types.ts";
 
 function project(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
@@ -76,4 +76,9 @@ test("buildProjectPacket references paths without reading file contents", () => 
   const packet = buildProjectPacket(project({ contextPaths: ["/definitely/not/read/secret.md"] }), []);
   assert.match(packet, /\/definitely\/not\/read\/secret.md/);
   assert.doesNotMatch(packet, /secret file contents/i);
+});
+
+test("joinContextBlocks combines project and memory sections cleanly", () => {
+  const joined = joinContextBlocks(["## Project: pi-lodestone", undefined, "## Pi memory (verify)\n- [m1] Memory"]);
+  assert.equal(joined, "## Project: pi-lodestone\n\n---\n\n## Pi memory (verify)\n- [m1] Memory");
 });

@@ -17,6 +17,8 @@ import {
   INJECTION_LOG_FILE,
   MEMORY_DIR,
   PROJECTS_FILE,
+  PROJECT_PACKET_INJECT,
+  PROJECT_PACKET_MAX_CHARS,
   MEMORY_GET_MAX_OUTPUT_CHARS,
   SEARCH_DEFAULT_LIMIT,
   SEARCH_SNIPPET_CHARS,
@@ -31,7 +33,7 @@ import { store } from "./store-instance.ts";
 import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from "./scoring.ts";
 import { rankMemoryMatches } from "./retrieval.ts";
 import { ProjectStore } from "./projects.ts";
-import { buildProjectPacket, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
+import { buildProjectPacket, joinContextBlocks, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
 import { sanitize } from "./sanitize.ts";
@@ -1011,11 +1013,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     pendingMemoryPreamble = undefined;
-    if (!AUTO_INJECT) return;
+    await projectStore.activateForCwd(ctx.cwd);
+    if (!AUTO_INJECT && !PROJECT_PACKET_INJECT) return;
     if (!(await projectEnabled(ctx.cwd))) return;
+
     const prompt = sanitize(event.prompt ?? "");
-    if (prompt.length < 8) return;
-    const query = compactQuery(prompt, INJECT_QUERY_MAX_TOKENS);
+    const query = prompt.length >= 8 ? compactQuery(prompt, INJECT_QUERY_MAX_TOKENS) : "";
     const baseRecord = {
       ts: new Date().toISOString(),
       cwd: ctx.cwd,
@@ -1026,21 +1029,40 @@ export default function (pi: ExtensionAPI) {
       limit: INJECT_LIMIT,
       globalInject: GLOBAL_AUTO_INJECT,
     };
-    if (query.length < 3) {
-      if (DIAGNOSTIC_LOGS) await logInjection(INJECTION_LOG_FILE, { ...baseRecord, results: [] }).catch(() => undefined);
-      return;
+
+    let projectBlock: string | undefined;
+    const projectPacketDiag: { enabled: boolean; projectId?: string; chars?: number; skippedReason?: string } = { enabled: PROJECT_PACKET_INJECT };
+    if (PROJECT_PACKET_INJECT) {
+      const registry = await projectStore.read();
+      const activeProject = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
+      if (activeProject) {
+        projectBlock = buildProjectPacket(activeProject, await store.all(), { maxChars: PROJECT_PACKET_MAX_CHARS });
+        projectPacketDiag.projectId = activeProject.id;
+        projectPacketDiag.chars = projectBlock.length;
+      } else {
+        projectPacketDiag.skippedReason = "no_active_project";
+      }
+    } else {
+      projectPacketDiag.skippedReason = "disabled";
     }
-    const results = await search(query, {
-      limit: INJECT_LIMIT,
-      cwd: ctx.cwd,
-      projectOnly: !GLOBAL_AUTO_INJECT,
-      forInjection: true,
-      minScore: INJECT_MIN_SCORE,
-      snippetChars: INJECT_SNIPPET_CHARS,
-    });
+
+    let results: ReturnType<typeof compact>[] = [];
+    if (AUTO_INJECT && query.length >= 3) {
+      results = await search(query, {
+        limit: INJECT_LIMIT,
+        cwd: ctx.cwd,
+        projectOnly: !GLOBAL_AUTO_INJECT,
+        forInjection: true,
+        minScore: INJECT_MIN_SCORE,
+        snippetChars: INJECT_SNIPPET_CHARS,
+      });
+    }
+
     if (DIAGNOSTIC_LOGS) {
       await logInjection(INJECTION_LOG_FILE, {
         ...baseRecord,
+        queryLength: query.length,
+        projectPacket: projectPacketDiag,
         results: results.map((r) => ({
           id: r.id,
           title: r.title,
@@ -1051,16 +1073,18 @@ export default function (pi: ExtensionAPI) {
         })),
       }).catch(() => undefined);
     }
-    if (results.length === 0) return;
-    await bumpUse(results.map((r) => r.id), "injected");
+
+    if (results.length) await bumpUse(results.map((r) => r.id), "injected");
     const currentProject = projectName(ctx.cwd);
     const showProject = GLOBAL_AUTO_INJECT || results.some((r) => r.project !== currentProject);
-    const memoryBlock = [
+    const memoryBlock = results.length ? [
       "## Pi memory (verify)",
       ...results.map((r) => `- [${r.id}] ${r.important ? "★ " : ""}${r.title}${showProject ? ` (${r.project})` : ""} — ${r.createdAt.slice(0, 10)}: ${r.snippet}`),
-    ].join("\n");
-    if (INJECT_PLACEMENT === "system") return { systemPrompt: `${event.systemPrompt}\n\n${memoryBlock}` };
-    pendingMemoryPreamble = memoryBlock;
+    ].join("\n") : undefined;
+    const contextBlock = joinContextBlocks([projectBlock, memoryBlock]);
+    if (!contextBlock) return;
+    if (INJECT_PLACEMENT === "system") return { systemPrompt: `${event.systemPrompt}\n\n${contextBlock}` };
+    pendingMemoryPreamble = contextBlock;
   });
 
   pi.on("context", async (event) => {

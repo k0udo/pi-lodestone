@@ -32,7 +32,8 @@ slash commands.
 - **Context-aware injection.** Before a turn, relevant memories are added as a
   non-persistent preamble on the latest user message (keeping the system prompt
   stable for prefix-cache reuse). Generic instruction words are dropped, multi-token
-  evidence is required, and long prompts are damped to avoid false positives.
+  evidence is required, and long prompts are damped to avoid false positives. Project
+  packet injection is available but opt-in (`PI_PROJECT_PACKET_INJECT=true`).
 - **Local-LLM first.** Lexical, deterministic scoring (no embeddings/model calls),
   small snippets, and tight token budgets keep retrieval fast and predictable.
 - **Privacy guards.** `<private>…</private>` blocks are stripped before storage and

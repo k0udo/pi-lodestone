@@ -20,6 +20,8 @@ export const INJECT_MIN_SCORE = Number(process.env.PI_MEMORY_INJECT_MIN_SCORE ??
 export const INJECT_SNIPPET_CHARS = Number(process.env.PI_MEMORY_INJECT_SNIPPET_CHARS ?? 180);
 export const INJECT_QUERY_MAX_TOKENS = Number(process.env.PI_MEMORY_INJECT_QUERY_MAX_TOKENS ?? 32);
 export const INJECT_PLACEMENT = (process.env.PI_MEMORY_INJECT_PLACEMENT ?? "user").toLowerCase() === "system" ? "system" : "user";
+export const PROJECT_PACKET_INJECT = (process.env.PI_PROJECT_PACKET_INJECT ?? "false") === "true";
+export const PROJECT_PACKET_MAX_CHARS = Number(process.env.PI_PROJECT_PACKET_MAX_CHARS ?? 1_200);
 export const SEARCH_DEFAULT_LIMIT = Number(process.env.PI_MEMORY_SEARCH_DEFAULT_LIMIT ?? 5);
 export const SEARCH_SNIPPET_CHARS = Number(process.env.PI_MEMORY_SEARCH_SNIPPET_CHARS ?? 220);
 export const STALENESS_DEFAULT_DAYS = Number(process.env.PI_MEMORY_STALENESS_DAYS ?? 30);
