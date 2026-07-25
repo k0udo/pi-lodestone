@@ -8,6 +8,7 @@ Lodestone is intentionally minimal for local-LLM operation:
 
 - **Single decision store**: `~/.pi/agent/memory/decisions.jsonl`. Append-only, in-process cached, mtime-invalidated on foreign writes.
 - **Sticky project registry**: `~/.pi/agent/memory/projects.json` tracks projects, linked folders, context/artifact paths, and the active project for decision stamping and status-line context.
+- **Related-session index**: `~/.pi/agent/memory/sessions.jsonl` stores project-linked session titles and metadata, not transcript dumps.
 - **Minimal lifecycle metadata**: `archived`, `important`, plus optional `projectId`, `supersededBy`/`supersedes`/`conflictsWith` for explicit human-reviewed corrections.
 - **No tool-result auto-capture**: tool calls write no diagnostic usage logs unless `PI_MEMORY_DIAGNOSTIC_LOGS=true`. The local model never pays for a dedupe/append round-trip on every read/edit/bash call.
 - **No agent_end auto-capture by default** (set `PI_MEMORY_AUTO_TURN_CAPTURE=true` to opt in).
@@ -23,6 +24,7 @@ Lodestone is intentionally minimal for local-LLM operation:
 /project new <name>
 /project use <name|id>
 /project packet [maxChars]
+/project sessions [n]
 /project root add [path]
 /project root remove <n|path>
 /project root list

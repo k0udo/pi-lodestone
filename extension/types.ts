@@ -16,6 +16,19 @@ export type ProjectRegistry = {
   projects: ProjectRecord[];
 };
 
+export type ProjectSessionRecord = {
+  id: string;
+  projectId: string;
+  sessionFile?: string;
+  cwd: string;
+  startedAt: string;
+  updatedAt: string;
+  title?: string;
+  summary?: string;
+  decisionIds?: string[];
+  artifactPaths?: string[];
+};
+
 export type Decision = {
   id: string;
   createdAt: string;

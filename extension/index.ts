@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { Decision, ProjectRecord, ProjectRegistry } from "./types.ts";
+import type { Decision, ProjectRecord, ProjectRegistry, ProjectSessionRecord } from "./types.ts";
 import {
   AUTO_INJECT,
   AUTO_TURN_CAPTURE,
@@ -22,6 +22,7 @@ import {
   MEMORY_GET_MAX_OUTPUT_CHARS,
   SEARCH_DEFAULT_LIMIT,
   SEARCH_SNIPPET_CHARS,
+  SESSIONS_FILE,
   STALENESS_DEFAULT_DAYS,
   TOOL_USAGE_LOG_FILE,
   UPDATE_USAGE_COUNTERS,
@@ -34,6 +35,7 @@ import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from 
 import { rankMemoryMatches } from "./retrieval.ts";
 import { ProjectStore } from "./projects.ts";
 import { buildProjectPacket, joinContextBlocks, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
+import { deriveSessionId, SessionStore, titleFromEntries } from "./sessions.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
 import { sanitize } from "./sanitize.ts";
@@ -46,6 +48,7 @@ import { writeVaultNote } from "./vault.ts";
 import { renderStaleness, staleMemories } from "./staleness.ts";
 
 const projectStore = new ProjectStore({ path: PROJECTS_FILE });
+const sessionStore = new SessionStore({ path: SESSIONS_FILE });
 
 const INJECTION_QUERY_STOP_WORDS = new Set([
   "again", "another", "assessment", "begin", "changes", "check", "closing", "commit", "complete",
@@ -239,11 +242,50 @@ function resolveProjectPath(cwd: string, path: string | undefined) {
   return resolve(cwd, raw);
 }
 
+function sessionEntries(ctx: any) {
+  try {
+    return ctx.sessionManager?.getEntries?.() ?? ctx.sessionManager?.getBranch?.() ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function sessionFile(ctx: any) {
+  try {
+    return ctx.sessionManager?.getSessionFile?.();
+  } catch {
+    return undefined;
+  }
+}
+
+async function upsertProjectSession(ctx: any, project: ProjectRecord | undefined, title?: string) {
+  if (!project) return undefined;
+  const entries = sessionEntries(ctx);
+  const file = sessionFile(ctx);
+  const now = new Date().toISOString();
+  const id = deriveSessionId(file, entries, ctx.cwd);
+  const existing = (await sessionStore.all()).find((session) => session.id === id);
+  const record: ProjectSessionRecord = {
+    id,
+    projectId: project.id,
+    sessionFile: file,
+    cwd: ctx.cwd,
+    startedAt: existing?.startedAt ?? now,
+    updatedAt: now,
+    title: sanitize(title ?? titleFromEntries(entries) ?? existing?.title ?? `Session ${now.slice(0, 10)}`),
+    summary: existing?.summary,
+    decisionIds: existing?.decisionIds ?? [],
+    artifactPaths: existing?.artifactPaths ?? [],
+  };
+  await sessionStore.upsert(record);
+  return record;
+}
+
 function numbered(items: string[] | undefined, empty: string) {
   return items?.length ? items.map((item, i) => `${i + 1}. ${item}`) : [`- ${empty}`];
 }
 
-function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecord | undefined, activeId: string | undefined, cwd: string, decisions: Decision[]) {
+function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecord | undefined, activeId: string | undefined, cwd: string, decisions: Decision[], sessions: ProjectSessionRecord[] = []) {
   const projects = registry.projects.filter((p) => !p.archived);
   const pinned = selected ? decisions.filter((d) => !d.archived && d.important && d.projectId === selected.id) : [];
   return [
@@ -259,7 +301,7 @@ function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecor
     "Context / artifacts:",
     ...numbered(selected?.contextPaths, "No context paths linked."),
     "Related sessions:",
-    "- Session capture not enabled yet.",
+    ...(sessions.length ? sessions.slice(0, 5).map((session, i) => `${i + 1}. ${session.updatedAt.slice(0, 10)} — ${session.title ?? session.cwd}`) : ["- No related sessions indexed yet."]),
     "Pinned memories:",
     ...(pinned.length ? pinned.slice(0, 8).map((d) => `- [${d.id}] ★ ${d.title}`) : ["- No pinned memories for this project."]),
     "",
@@ -297,7 +339,8 @@ async function showProjectDashboard(ctx: any) {
   if (ctx.mode !== "tui") {
     const registry = await projectStore.read();
     const active = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
-    ctx.ui.setWidget("pi-project", projectDashboardLines(registry, active, registry.activeProjectId, ctx.cwd, await store.all()), { placement: "belowEditor" });
+    const sessions = active ? await sessionStore.recent(active.id, 5) : [];
+    ctx.ui.setWidget("pi-project", projectDashboardLines(registry, active, registry.activeProjectId, ctx.cwd, await store.all(), sessions), { placement: "belowEditor" });
     return;
   }
 
@@ -306,10 +349,12 @@ async function showProjectDashboard(ctx: any) {
     const projects = registry.projects.filter((p) => !p.archived);
     let selectedIndex = Math.max(0, projects.findIndex((p) => p.id === registry.activeProjectId));
     const decisions = await store.all();
+    const sessionsByProject = new Map<string, ProjectSessionRecord[]>();
+    for (const project of projects) sessionsByProject.set(project.id, await sessionStore.recent(project.id, 5));
     const result = await ctx.ui.custom<{ action: DashboardAction; projectId?: string } | null>((tui: any, _theme: any, _kb: any, done: (value: { action: DashboardAction; projectId?: string } | null) => void) => ({
       render(width: number) {
         const selected = projects[selectedIndex];
-        const body = projectDashboardLines(registry, selected, registry.activeProjectId, ctx.cwd, decisions);
+        const body = projectDashboardLines(registry, selected, registry.activeProjectId, ctx.cwd, decisions, selected ? sessionsByProject.get(selected.id) ?? [] : []);
         return borderedLines(selected ? `Project: ${selected.name}` : "Project dashboard", body, width);
       },
       invalidate() {},
@@ -522,6 +567,21 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (sub === "sessions") {
+        const active = await projectStore.active();
+        if (!active) {
+          ctx.ui.notify("No active project. Run /project new <name> first.", "warning");
+          return;
+        }
+        const limit = clampNumber(Number(rest[0]), 10, 1, 50);
+        const sessions = await sessionStore.recent(active.id, limit);
+        const lines = sessions.length
+          ? sessions.map((session, i) => `${i + 1}. ${session.updatedAt.slice(0, 16).replace("T", " ")} — ${session.title ?? session.cwd}${session.sessionFile ? ` [${session.id}]` : ""}`)
+          : ["No related sessions indexed yet."];
+        ctx.ui.setWidget("pi-project", [`Related sessions for ${active.name}:`, ...lines], { placement: "belowEditor" });
+        return;
+      }
+
       if (sub === "root") {
         const action = rest[0];
         const active = await projectStore.active();
@@ -590,7 +650,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      ctx.ui.notify("Usage: /project [dashboard|list|new <name>|use <name|id>|packet [maxChars]|root add|remove|list|context add|remove|list]", "warning");
+      ctx.ui.notify("Usage: /project [dashboard|list|new <name>|use <name|id>|packet [maxChars]|sessions [n]|root add|remove|list|context add|remove|list]", "warning");
     },
   });
 
@@ -1004,7 +1064,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     await store.ensure();
     await projectStore.ensure();
-    await projectStore.activateForCwd(ctx.cwd);
+    await sessionStore.ensure();
+    const project = await projectStore.activateForCwd(ctx.cwd) ?? await projectStore.active();
+    await upsertProjectSession(ctx, project);
     if (ctx.hasUI) {
       ctx.ui.setStatus("pi-memory", "mem:on");
       await updateProjectStatus(ctx);
@@ -1092,8 +1154,15 @@ export default function (pi: ExtensionAPI) {
     return { messages: applyUserPreamble(event.messages, pendingMemoryPreamble) };
   });
 
-  pi.on("agent_end", async () => {
+  pi.on("agent_end", async (_event, ctx) => {
     pendingMemoryPreamble = undefined;
+    const project = await projectStore.active();
+    await upsertProjectSession(ctx, project);
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    const project = await projectStore.active();
+    await upsertProjectSession(ctx, project);
   });
 
   // Optional, opt-in only. Default disabled. Set PI_MEMORY_AUTO_TURN_CAPTURE=true to enable.

@@ -19,6 +19,7 @@ pi-lodestone is persistent memory for Pi with local LLM operation as the default
 - `extension/storage.ts` — append-only JSONL decision store, file locking, atomic rewrites, settings, archive/patch helpers.
 - `extension/projects.ts` — sticky project registry (`projects.json`) for active project identity, linked roots, and context/artifact paths.
 - `extension/project-packet.ts` — bounded markdown packet builder for project roots, artifacts, and pinned memories; references paths only.
+- `extension/sessions.ts` — advisory related-session index (`sessions.jsonl`) keyed by active project; stores titles/metadata, not transcripts.
 - `extension/scoring.ts` — tokenization, project scoping, deterministic score calculation, and auto-injection filters.
 - `extension/sanitize.ts` — privacy guards: `<private>` stripping and secret masking applied on every write path.
 - `extension/text.ts` — generic text helpers (content extraction, truncation, query-aware excerpts, output caps).

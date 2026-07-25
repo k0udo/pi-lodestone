@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import type { Decision, ProjectRecord } from "../extension/types.ts";
+import type { Decision, ProjectRecord, ProjectSessionRecord } from "../extension/types.ts";
 
 function makeBaseDecision(overrides?: Partial<Decision>): Decision {
   return {
@@ -29,6 +29,23 @@ function runTest(name: string, fn: () => void) {
     throw error;
   }
 }
+
+runTest("ProjectSessionRecord schema - related session index", () => {
+  const session: ProjectSessionRecord = {
+    id: "ses_1",
+    projectId: "prj_test",
+    sessionFile: "/tmp/session.jsonl",
+    cwd: "/repos/test",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T01:00:00.000Z",
+    title: "Test session",
+    summary: "Short summary",
+    decisionIds: ["mem_1"],
+    artifactPaths: ["/repos/test/README.md"],
+  };
+  assert.equal(session.projectId, "prj_test");
+  assert.deepEqual(session.decisionIds, ["mem_1"]);
+});
 
 runTest("ProjectRecord schema - context and artifact paths", () => {
   const project: ProjectRecord = {
