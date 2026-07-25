@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { Decision, ProjectRecord, ProjectRegistry, ProjectSessionRecord } from "./types.ts";
+import type { Decision, ProjectRecord, ProjectSessionRecord } from "./types.ts";
 import {
   AUTO_INJECT,
   AUTO_TURN_CAPTURE,
@@ -35,6 +35,7 @@ import { inferTags, projectName, projectRoot, sameProjectScope, tokenize } from 
 import { rankMemoryMatches } from "./retrieval.ts";
 import { ProjectStore } from "./projects.ts";
 import { buildProjectPacket, joinContextBlocks, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
+import { borderedLines, numbered, projectDashboardLines } from "./project-dashboard.ts";
 import { deriveSessionId, SessionStore, titleFromEntries } from "./sessions.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
@@ -227,7 +228,11 @@ async function activeProjectLabel(cwd: string) {
 }
 
 async function updateProjectStatus(ctx: any) {
-  if (ctx.hasUI) ctx.ui.setStatus("pi-project", `▸ ${await activeProjectLabel(ctx.cwd)}`);
+  if (!ctx.hasUI) return;
+  const active = await projectStore.active();
+  const label = active?.name ?? projectName(ctx.cwd);
+  ctx.ui.setStatus("pi-project", `▸ ${label}`);
+  ctx.ui.setTitle(active ? `pi - ${active.name}` : `pi - ${label}`);
 }
 
 async function projectEnabled(cwd: string) {
@@ -281,48 +286,6 @@ async function upsertProjectSession(ctx: any, project: ProjectRecord | undefined
   return record;
 }
 
-function numbered(items: string[] | undefined, empty: string) {
-  return items?.length ? items.map((item, i) => `${i + 1}. ${item}`) : [`- ${empty}`];
-}
-
-function projectDashboardLines(registry: ProjectRegistry, selected: ProjectRecord | undefined, activeId: string | undefined, cwd: string, decisions: Decision[], sessions: ProjectSessionRecord[] = []) {
-  const projects = registry.projects.filter((p) => !p.archived);
-  const pinned = selected ? decisions.filter((d) => !d.archived && d.important && d.projectId === selected.id) : [];
-  return [
-    `Project dashboard${selected ? `: ${selected.name}` : ""}`,
-    `cwd: ${cwd}`,
-    "",
-    "Projects:",
-    ...(projects.length ? projects.map((p, i) => `${p.id === selected?.id ? "›" : " "} ${p.id === activeId ? "*" : " "} ${i + 1}. ${p.name} [${p.id}]`) : ["- No projects. Press n or run /project new <name>."]),
-    "",
-    selected ? `Selected: ${selected.name} (${selected.id})${selected.id === activeId ? " — active" : ""}` : "Selected: none",
-    "Linked folders:",
-    ...numbered(selected?.roots, "No folders linked."),
-    "Context / artifacts:",
-    ...numbered(selected?.contextPaths, "No context paths linked."),
-    "Related sessions:",
-    ...(sessions.length ? sessions.slice(0, 5).map((session, i) => `${i + 1}. ${session.updatedAt.slice(0, 10)} — ${session.title ?? session.cwd}`) : ["- No related sessions indexed yet."]),
-    "Pinned memories:",
-    ...(pinned.length ? pinned.slice(0, 8).map((d) => `- [${d.id}] ★ ${d.title}`) : ["- No pinned memories for this project."]),
-    "",
-    "Keys: ↑↓ browse · enter switch · n new · a add folder · r remove folder · c add context · x remove context · p packet · q close",
-  ];
-}
-
-function truncatePlain(line: string, width: number) {
-  return line.length <= width ? line : `${line.slice(0, Math.max(0, width - 1))}…`;
-}
-
-function borderedLines(title: string, body: string[], width: number) {
-  const safeWidth = Math.max(50, width);
-  const innerWidth = safeWidth - 2;
-  const label = ` ${truncatePlain(title, Math.max(1, innerWidth - 4))} `;
-  const topFill = Math.max(0, innerWidth - label.length - 1);
-  const top = `╭─${label}${"─".repeat(topFill)}╮`;
-  const bottom = `╰${"─".repeat(innerWidth)}╯`;
-  return [top, ...body.map((line) => `│${truncatePlain(line, innerWidth).padEnd(innerWidth)}│`), bottom];
-}
-
 type DashboardAction = "use" | "new" | "add-root" | "remove-root" | "add-context" | "remove-context" | "packet";
 
 async function showProjectPacket(ctx: any, projectId?: string, maxChars = PROJECT_PACKET_DEFAULT_MAX_CHARS) {
@@ -341,7 +304,7 @@ async function showProjectDashboard(ctx: any) {
     const registry = await projectStore.read();
     const active = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
     const sessions = active ? await sessionStore.recent(active.id, 5) : [];
-    ctx.ui.setWidget("pi-project", projectDashboardLines(registry, active, registry.activeProjectId, ctx.cwd, await store.all(), sessions), { placement: "belowEditor" });
+    ctx.ui.setWidget("pi-project", projectDashboardLines({ registry, selected: active, activeId: registry.activeProjectId, cwd: ctx.cwd, decisions: await store.all(), sessions }), { placement: "belowEditor" });
     return;
   }
 
@@ -355,7 +318,7 @@ async function showProjectDashboard(ctx: any) {
     const result = await ctx.ui.custom<{ action: DashboardAction; projectId?: string } | null>((tui: any, _theme: any, _kb: any, done: (value: { action: DashboardAction; projectId?: string } | null) => void) => ({
       render(width: number) {
         const selected = projects[selectedIndex];
-        const body = projectDashboardLines(registry, selected, registry.activeProjectId, ctx.cwd, decisions, selected ? sessionsByProject.get(selected.id) ?? [] : []);
+        const body = projectDashboardLines({ registry, selected, activeId: registry.activeProjectId, cwd: ctx.cwd, decisions, sessions: selected ? sessionsByProject.get(selected.id) ?? [] : [] });
         return borderedLines(selected ? `Project: ${selected.name}` : "Project dashboard", body, width);
       },
       invalidate() {},
