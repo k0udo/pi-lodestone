@@ -330,7 +330,8 @@ async function showProjectPacket(ctx: any, projectId?: string, maxChars = PROJEC
   const project = projectId
     ? registry.projects.find((p) => p.id === projectId && !p.archived)
     : registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
-  const packet = buildProjectPacket(project, await store.all(), { maxChars });
+  const sessions = project ? await sessionStore.recent(project.id, 3) : [];
+  const packet = buildProjectPacket(project, await store.all(), { maxChars, sessions });
   ctx.ui.setWidget("pi-project-packet", packet.split("\n"), { placement: "belowEditor" });
   return packet;
 }
@@ -463,7 +464,8 @@ export default function (pi: ExtensionAPI) {
       const registry = await projectStore.read();
       const project = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
       const maxChars = clampNumber(params.maxChars, PROJECT_PACKET_DEFAULT_MAX_CHARS, 500, 5_000);
-      const packet = buildProjectPacket(project, await store.all(), { maxChars });
+      const sessions = project ? await sessionStore.recent(project.id, 3) : [];
+      const packet = buildProjectPacket(project, await store.all(), { maxChars, sessions });
       await recordToolUsage("memory-project-context", ctx.cwd, project ? 1 : 0, { projectId: project?.id, maxChars });
       return { content: [{ type: "text" as const, text: packet }], details: { projectId: project?.id, maxChars } };
     },
@@ -1098,7 +1100,7 @@ export default function (pi: ExtensionAPI) {
       const registry = await projectStore.read();
       const activeProject = registry.projects.find((p) => p.id === registry.activeProjectId && !p.archived);
       if (activeProject) {
-        projectBlock = buildProjectPacket(activeProject, await store.all(), { maxChars: PROJECT_PACKET_MAX_CHARS });
+        projectBlock = buildProjectPacket(activeProject, await store.all(), { maxChars: PROJECT_PACKET_MAX_CHARS, sessions: await sessionStore.recent(activeProject.id, 3) });
         projectPacketDiag.projectId = activeProject.id;
         projectPacketDiag.chars = projectBlock.length;
       } else {

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { buildProjectPacket, joinContextBlocks } from "../extension/project-packet.ts";
-import type { Decision, ProjectRecord } from "../extension/types.ts";
+import type { Decision, ProjectRecord, ProjectSessionRecord } from "../extension/types.ts";
 
 function project(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -13,6 +13,21 @@ function project(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
     contextPaths: ["/Users/koudo/Repos/pi-lodestone/docs/proposals/projects.md"],
     artifactPaths: [],
     archived: false,
+    ...overrides,
+  };
+}
+
+function session(overrides: Partial<ProjectSessionRecord> = {}): ProjectSessionRecord {
+  return {
+    id: "ses-1",
+    projectId: "prj_lodestone",
+    cwd: "/Users/koudo/Repos/pi-lodestone",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T01:00:00.000Z",
+    title: "Project packet work",
+    summary: "Added packet preview",
+    decisionIds: [],
+    artifactPaths: [],
     ...overrides,
   };
 }
@@ -70,6 +85,39 @@ test("buildProjectPacket handles empty and missing projects", () => {
   assert.match(empty, /No context paths linked/);
   assert.match(empty, /No pinned memories/);
   assert.equal(buildProjectPacket(undefined, []), "No active Lodestone project.");
+});
+
+test("buildProjectPacket includes recent sessions newest first", () => {
+  const packet = buildProjectPacket(project(), [], {
+    sessions: [
+      session({ id: "old", title: "Old session", updatedAt: "2026-01-01T00:00:00.000Z" }),
+      session({ id: "new", title: "New session", updatedAt: "2026-01-03T00:00:00.000Z" }),
+      session({ id: "other", projectId: "prj_other", title: "Other project", updatedAt: "2026-01-04T00:00:00.000Z" }),
+    ],
+  });
+  assert.ok(packet.indexOf("New session") < packet.indexOf("Old session"));
+  assert.doesNotMatch(packet, /Other project/);
+});
+
+test("buildProjectPacket respects recent session limit", () => {
+  const packet = buildProjectPacket(project(), [], {
+    includeSessionLimit: 1,
+    sessions: [
+      session({ id: "one", title: "One", updatedAt: "2026-01-03T00:00:00.000Z" }),
+      session({ id: "two", title: "Two", updatedAt: "2026-01-02T00:00:00.000Z" }),
+    ],
+  });
+  assert.match(packet, /One/);
+  assert.doesNotMatch(packet, /Two/);
+});
+
+test("buildProjectPacket references session metadata without transcript content", () => {
+  const packet = buildProjectPacket(project(), [], {
+    sessions: [session({ title: "Session title", summary: "Metadata summary", artifactPaths: ["/tmp/artifact.md"] })],
+  });
+  assert.match(packet, /Session title/);
+  assert.match(packet, /Metadata summary/);
+  assert.doesNotMatch(packet, /raw assistant message/i);
 });
 
 test("buildProjectPacket references paths without reading file contents", () => {

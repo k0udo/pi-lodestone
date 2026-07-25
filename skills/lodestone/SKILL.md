@@ -13,7 +13,7 @@ Lodestone persists a small curated set of **decisions, preferences, and workflow
 - Use `memory-search` before `memory-get` and before `memory-add`; avoid duplicates and only fetch/add what matters.
 - Use `projectOnly=true` for repo-specific workflows/preferences unless cross-project context is needed.
 - Use `/project` when the user wants to view or manage project identity, linked folders, or context/artifact paths.
-- Use `memory-project-context` when the current project packet would help; it references linked files without reading them.
+- Use `memory-project-context` when the current project packet would help; it references linked files and recent session metadata without reading files.
 - Use `memory-add` when the user asks to remember something or when a durable decision/workflow/fix should outlive this session.
 - Wrap sensitive content in `<private>...</private>` — those blocks are stripped before storage.
 - Prefer concise human-meaningful titles and bodies. One decision per entry.
@@ -34,7 +34,7 @@ memory-get(ids, maxChars?)
   Fetch full bodies for selected IDs. Batch only IDs you actually need; raise maxChars only when needed.
 
 memory-project-context(maxChars?)
-  Fetch the bounded active project packet: linked folders, context/artifact paths, and pinned memories. It references paths only; read files separately when needed.
+  Fetch the bounded active project packet: linked folders, context/artifact paths, pinned memories, and recent session metadata. It references paths only; read files separately when needed.
 
 memory-add(title, text, tags?, important?)
   Persist a durable decision. Set important=true to pin it.
