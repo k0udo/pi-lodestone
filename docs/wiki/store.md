@@ -1,6 +1,6 @@
 # Decision store
 
-The store is a `DecisionStore` class in `extension/storage.ts` that manages `~/.pi/agent/memory/decisions.jsonl`.
+The primary store is a `DecisionStore` class in `extension/storage.ts` that manages `~/.pi/agent/memory/decisions.jsonl`. Lodestone also maintains `projects.json` (`extension/projects.ts`) and `sessions.jsonl` (`extension/sessions.ts`) for project workspace context.
 
 ## File format
 
@@ -78,11 +78,18 @@ A separate `settings.json` file stores project-level settings:
 
 ```json
 {
-  "disabledProjects": ["/repos/secret-project"]
+  "disabledProjects": ["/repos/secret-project"],
+  "disabledProjectIds": ["prj_secret"]
 }
 ```
 
-Projects in this list are excluded from automatic injection. The list is keyed by exact `ctx.cwd` at the time of disable.
+`disabledProjectIds` is the current project-aware disable list. `disabledProjects` is retained for backward-compatible cwd-keyed disables.
+
+## Project and session context stores
+
+`projects.json` stores the sticky project registry: active project id, linked roots, context/artifact paths, and archive state. It is a small JSON document, not JSONL.
+
+`sessions.jsonl` stores advisory related-session records keyed by project id. Records include stable ids, cwd, timestamps, title/summary metadata, and artifact/decision id references. They intentionally do **not** store transcripts.
 
 ## Migration
 

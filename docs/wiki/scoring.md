@@ -91,6 +91,10 @@ When changing scoring logic:
 4. Preserve the invariant: zero lexical overlap → score 0.
 5. Keep auto-injection stricter than manual search.
 
+## Project packet context
+
+Project packets are built by `extension/project-packet.ts` from the active project registry, pinned memories, and recent session metadata. They do not use lexical scoring and are not injected by default. Set `PI_PROJECT_PACKET_INJECT=true` to opt in; the packet remains bounded by `PI_PROJECT_PACKET_MAX_CHARS` and references linked files without reading them.
+
 ## Diagnostic stats
 
 When `PI_MEMORY_DIAGNOSTIC_LOGS=true`, injection events are logged to `injections.jsonl`. Use:
