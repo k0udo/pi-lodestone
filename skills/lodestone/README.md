@@ -18,7 +18,7 @@ Lodestone is intentionally minimal for local-LLM operation:
 
 ## Slash commands
 
-`/project` opens a dashboard with active status, linked-folder/context/session/pinned-memory counts, recent sessions, and keyboard hints. In TUI mode Lodestone also keeps a footer status (`▸ <project>`) and terminal title aligned with the active project.
+`/project` opens a dashboard with active status, a visibly selected project row, linked-folder/context/session/pinned-memory counts, recent sessions, and keyboard hints. In TUI mode Lodestone also keeps a footer status (`▸ <project>`) and terminal title aligned with the active project. Folder/context entry preserves absolute paths, expands `~`, and resolves relative paths from the current cwd.
 
 ```text
 /project                         open the project dashboard

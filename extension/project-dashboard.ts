@@ -52,7 +52,11 @@ export function projectDashboardLines(input: ProjectDashboardInput) {
     `- ${countLabel(pinned.length, "pinned memory", "pinned memories")}`,
     "",
     "Projects:",
-    ...(projects.length ? projects.map((p, i) => `${p.id === selected?.id ? "›" : " "} ${p.id === activeId ? "*" : " "} ${i + 1}. ${p.name} [${p.id}]`) : ["- No projects yet. Press n or run /project new <name>."]),
+    ...(projects.length ? projects.map((p, i) => {
+      const isSelected = p.id === selected?.id;
+      const isActive = p.id === activeId;
+      return `${isSelected ? "▶ SELECTED" : "          "} ${isActive ? "*" : " "} ${i + 1}. ${p.name} [${p.id}]${isActive ? " active" : ""}`;
+    }) : ["- No projects yet. Press n or run /project new <name>."]),
     "",
     selected ? `Selected: ${selected.name} (${selected.id})${selected.id === activeId ? " — active" : ""}` : "Selected: none",
     "Linked folders:",

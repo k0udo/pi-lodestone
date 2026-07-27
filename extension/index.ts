@@ -1,5 +1,4 @@
 import { strict as assert } from "node:assert";
-import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Decision, ProjectRecord, ProjectSessionRecord } from "./types.ts";
@@ -36,6 +35,7 @@ import { rankMemoryMatches } from "./retrieval.ts";
 import { ProjectStore } from "./projects.ts";
 import { buildProjectPacket, joinContextBlocks, PROJECT_PACKET_DEFAULT_MAX_CHARS } from "./project-packet.ts";
 import { borderedLines, numbered, projectDashboardLines } from "./project-dashboard.ts";
+import { resolveProjectPath } from "./paths.ts";
 import { deriveSessionId, SessionStore, titleFromEntries } from "./sessions.ts";
 import { computeInjectionStats, computeToolUsageStats, logInjection, logToolUsage, readRecentInjections, readRecentToolUsage, renderInjectionStats, renderInjections, renderToolUsageStats } from "./injection-log.ts";
 import { migrate } from "./migrate.ts";
@@ -240,11 +240,6 @@ async function projectEnabled(cwd: string) {
   if ((settings.disabledProjects ?? []).includes(cwd)) return false;
   const projectId = await activeProjectId();
   return !(projectId && (settings.disabledProjectIds ?? []).includes(projectId));
-}
-
-function resolveProjectPath(cwd: string, path: string | undefined) {
-  const raw = path?.trim() || cwd;
-  return resolve(cwd, raw);
 }
 
 function sessionEntries(ctx: any) {

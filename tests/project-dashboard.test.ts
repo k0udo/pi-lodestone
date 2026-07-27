@@ -71,6 +71,7 @@ test("projectDashboardLines shows active state and section counts", () => {
   assert.match(lines, /1 recent session/);
   assert.match(lines, /1 pinned memory/);
   assert.match(lines, /Dashboard polish/);
+  assert.match(lines, /▶ SELECTED \* 1\. pi-lodestone \[prj_lodestone\] active/);
 });
 
 test("projectDashboardLines has helpful empty states", () => {
