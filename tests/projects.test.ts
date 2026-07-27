@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ProjectStore } from "../extension/projects.ts";
@@ -87,6 +87,17 @@ test("activateForCwd switches active project when cwd is inside a linked root", 
     assert.equal((await store.active())?.id, second.id);
     assert.equal((await store.activateForCwd("/repos/first/src"))?.id, first.id);
     assert.equal((await store.active())?.id, first.id);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("addRoot expands home-relative paths defensively", async () => {
+  const { store, dir } = await tempProjectStore();
+  try {
+    const project = await store.create("Notebook", "/repos/notebook");
+    const updated = await store.addRoot(project.id, "~/Repos/.ntb");
+    assert.ok(updated?.roots.includes(`${homedir()}/Repos/.ntb`));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

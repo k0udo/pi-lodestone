@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, relative } from "node:path";
+import { resolveProjectPath } from "./paths.ts";
 import { projectRoot } from "./scoring.ts";
 import type { ProjectRecord, ProjectRegistry } from "./types.ts";
 
@@ -25,7 +26,7 @@ function cleanName(name: string) {
 }
 
 function normalizePath(path: string) {
-  return resolve(path).replace(/\/+$/g, "") || "/";
+  return resolveProjectPath("/", path).replace(/\/+$/g, "") || "/";
 }
 
 function normalizePaths(paths: unknown) {

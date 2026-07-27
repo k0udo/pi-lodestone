@@ -310,11 +310,12 @@ async function showProjectDashboard(ctx: any) {
     const decisions = await store.all();
     const sessionsByProject = new Map<string, ProjectSessionRecord[]>();
     for (const project of projects) sessionsByProject.set(project.id, await sessionStore.recent(project.id, 5));
-    const result = await ctx.ui.custom<{ action: DashboardAction; projectId?: string } | null>((tui: any, _theme: any, _kb: any, done: (value: { action: DashboardAction; projectId?: string } | null) => void) => ({
+    const result = await ctx.ui.custom<{ action: DashboardAction; projectId?: string } | null>((tui: any, theme: any, _kb: any, done: (value: { action: DashboardAction; projectId?: string } | null) => void) => ({
       render(width: number) {
         const selected = projects[selectedIndex];
         const body = projectDashboardLines({ registry, selected, activeId: registry.activeProjectId, cwd: ctx.cwd, decisions, sessions: selected ? sessionsByProject.get(selected.id) ?? [] : [] });
-        return borderedLines(selected ? `Project: ${selected.name}` : "Project dashboard", body, width);
+        return borderedLines(selected ? `Project: ${selected.name}` : "Project dashboard", body, width)
+          .map((line) => line.includes("▶ SELECTED") ? theme.bg("selectedBg", theme.fg("accent", line)) : line);
       },
       invalidate() {},
       handleInput(data: string) {
